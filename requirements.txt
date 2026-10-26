@@ -1,0 +1,14 @@
+# DEDAA — Python dependencies
+# Install:  python -m pip install -r requirements.txt
+# NOTE: both agents auto-install missing deps on startup, so this file is for
+# explicit environment setup (CI / clean machines).
+
+# Skill #1 (sync_agent.py) — data extraction
+requests>=2.31
+beautifulsoup4>=4.12
+
+# Shared (both skills) — ChromaDB vector store (Python client, no MCP)
+chromadb>=0.4
+
+# Skill #2 (analyze_agent.py) — analytics / OLAP
+pandas>=2.0

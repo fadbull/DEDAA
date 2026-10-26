@@ -1,0 +1,63 @@
+# Environment variables — ALL .env files (any variant / any folder) are secret
+# and must never be committed to git.
+.env
+.env.*
+.env.*.local
+**/.env
+**/.env.*
+**/.env.*.local
+# ...but keep the documentation TEMPLATE (.env.example) trackable.
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project data — per-project ChromaDB folders, OLAP cubes and generated
+# dashboards are runtime artifacts and must never be committed.
+vector_dbs/
+analytics_dashboard.html
+jira_data_cube.csv
+**/analytics_dashboard.html
+**/jira_data_cube.csv
+chroma.sqlite3

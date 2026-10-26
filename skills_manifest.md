@@ -1,0 +1,410 @@
+# DEDAA — Skills Manifest
+
+**Data Extraction & Delivery Analytics Agent (DEDAA)**
+
+Единый текстовый манифест правил для внешних ИИ-агентов / A single text
+manifest of rules for external AI agents. Bilingual: English (EN) + Русский (RU).
+
+---
+
+## Table of Contents / Содержание
+
+1. [Environment / Окружение](#1-environment--окружение)
+2. [Skill #1 — Synchronizer (Data Extraction)](#2-skill-1--synchronizer-data-extraction)
+3. [Skill #2 — Analyst (Dashboard Generation)](#3-skill-2--analyst-dashboard-generation)
+4. [Role Models / Ролевые модели](#4-role-models--ролевые-модели)
+
+---
+
+## 1. Environment / Окружение
+
+### 1.1 Dependencies / Зависимости
+
+To build the environment, install the Python dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Required packages:
+
+| Package | Used by | Purpose |
+|---------|---------|---------|
+| `requests` | Skill #1 | HTTP calls to Jira/Confluence (with browser-like User-Agent to bypass 403) |
+| `beautifulsoup4` | Skill #1 | Parse Confluence HTML / extract links & images |
+| `chromadb` | Both | Vector store — read/write via the Python client (no MCP) |
+| `pandas` | Skill #2 | Analytics / OLAP data cubes |
+
+> **Auto-install:** Both agents check for missing Python libs on startup and
+> auto-install them into the current environment (`python -m pip install ...`).
+> `requirements.txt` is for explicit setup (CI / clean machines).
+
+### 1.2 Configuration / Конфигурация (`.env`)
+
+Copy `.env.example` to `.env` and fill in your real values:
+
+```bash
+cp .env.example .env
+```
+
+Example `.env`:
+
+```
+# Jira
+JIRA_URL=https://jiraeu.epam.com
+JIRA_USERNAME=you@company.com
+JIRA_TOKEN=<token>
+JIRA_PROJECT=EPMRLCT
+
+# Confluence
+CONFLUENCE_URL=https://kb.epam.com
+CONFLUENCE_USERNAME=you@company.com
+CONFLUENCE_TOKEN=<token>
+CONFLUENCE_PAGE_ID=2676801962
+CONFLUENCE_SPACE_KEY=EPMRLMEIMR   # optional: extract whole space
+
+# ChromaDB folder
+PROJECT_ALIAS=EMPRelocation        # optional: folder alias
+# DB_PATH=./vector_dbs/EPMRLCT    # optional: explicit folder
+```
+
+**Folder resolution priority (both tools):**
+1. `--db-path` (explicit)
+2. `DB_PATH` (.env)
+3. `--alias` → `./vector_dbs/<alias>`
+4. `PROJECT_ALIAS` (.env) → `./vector_dbs/<alias>`
+5. `JIRA_PROJECT` (.env) → `./vector_dbs/<project-key>`
+6. legacy default `./.vscode/chroma_vector_db`
+
+> **Security:** every `.env*` file is git-ignored. Never commit credentials.
+> Provide a `.env.example` template for documentation instead.
+
+---
+
+## 2. Skill #1 — Synchronizer (Data Extraction)
+
+**Tool:** [`sync_agent.py`](sync_agent.py)
+
+Downloads Jira issues or a Confluence page tree/space and stores clean text into
+an isolated, project-specific ChromaDB folder (collection + metadata with URLs).
+Each project gets its OWN folder so the vector DB is portable and can be handed
+to other agents or the customer.
+
+### 2.1 CLI Command Templates / Шаблоны CLI-команд
+
+```bash
+# Jira — folder auto-named ./vector_dbs/EPMRLCT (by project key)
+python sync_agent.py --service jira --project-key EPMRLCT
+
+# Same project under a customer-facing alias folder
+python sync_agent.py --service jira --project-key EPMRLCT --project-alias EMPRelocation
+
+# Confluence — extract an ENTIRE space (all pages via CQL search)
+python sync_agent.py --service confluence --space-key EPMRLMEIMR
+
+# Confluence — page tree under a root page
+python sync_agent.py --service confluence --page-id 2676801962
+
+# Confluence — page tree with deep-link crawling + image extraction
+python sync_agent.py --service confluence --page-id 2676801962 \
+  --follow-links --depth 2 --save-images
+
+# Jira reports — board reports (Control Chart, Epic Report, Velocity, CFD,
+# Scope Change, Forecast, Sprint) via the Agile/GreenHopper API
+python sync_agent.py --service jira-reports --project-key EPMRLCT
+
+# SYNC ALL (default) — pull every data source configured in .env:
+# Jira issues + related parameters, issue links, issue comments,
+# board reports, project versions/releases, and Confluence pages.
+python sync_agent.py
+
+# Use credentials from .env only
+python sync_agent.py --service jira --project-key EPMRLCT
+
+# Custom time window
+python sync_agent.py --service jira --project-key EPMRLCT --days 180
+
+# Full custom JQL
+python sync_agent.py --service jira --jql 'project=EPMRLCT AND updated >= -90d'
+
+# Dry-run (print only, no DB writes)
+python sync_agent.py --service jira --project-key EPMRLCT --dry-run
+
+# Show all options
+python sync_agent.py --help
+```
+
+### 2.2 Key Arguments / Ключевые аргументы
+
+| Flag | Purpose | Default |
+|------|---------|---------|
+| `--service` | `all`, `jira`, `jira-reports`, or `confluence` (`all` = pull every source in `.env`) | `all` |
+| `--url` | Base URL of the instance | from `.env` |
+| `--token` | API token | from `.env` |
+| `--username` | Login (email) | from `.env` |
+| `--db-path` | Explicit ChromaDB folder | auto (see resolution) |
+| `--project-alias` | Friendly folder alias | from `.env` (`PROJECT_ALIAS`) |
+| `--collection` | Chroma collection name | `product_jira` / `product_knowledge` / `product_jira_reports` |
+| `--project-key` | Jira project key | from `.env` (`JIRA_PROJECT`) |
+| `--jql` | Custom JQL (overrides `--days`) | built from key + days |
+| `--days` | How many days back to fetch | `90` |
+| `--space-key` | Confluence SPACE key (whole space) | from `.env` (`CONFLUENCE_SPACE_KEY`) |
+| `--page-id` | Confluence root page id | from `.env` (`CONFLUENCE_PAGE_ID`) |
+| `--depth` | Deep-crawl depth (0 = tree only) | `0` |
+| `--follow-links` | Follow in-page Confluence links | off |
+| `--save-images` | Download image/attachment artifacts | off |
+| `--assets-dir` | Assets folder (under db-path) | `assets` |
+| `--board-ids` | Board ids for `jira-reports` | all boards |
+| `--versions-collection` | Chroma collection for Jira release/version metadata | `product_jira_versions` |
+| `--batch-size` | Items per ingest batch | `15` |
+| `--update` | Incremental update: merge only changes since the last sync (upsert by id), preserving existing docs | off |
+| `--env-file` | `.env` path | `./.env` |
+| `--dry-run` | Print only, do not write | off |
+
+### 2.3 Behavior Notes / Примечания по поведению
+
+- **Per-project folders (default):** each project is stored in its own isolated
+  ChromaDB folder under `./vector_dbs/`, auto-named by the project key or
+  `--project-alias`. Pass `--db-path` (or `DB_PATH` in `.env`) to override.
+- **Confluence whole-space extraction:** with `--space-key <KEY>` the ENTIRE
+  space is downloaded (all pages via the paginated CQL search API), overriding
+  `--page-id`.
+- **Changelog extraction:** `sync_agent.py` requests `expand=changelog` and
+  fetches ALL custom fields (`customfield_XXXXX`) so Skill #2 can compute
+  cycle/lead time, time-in-status, and transition graphs.
+- **Issue links extraction:** `sync_agent.py` normalizes the raw `issuelinks`
+  array into structured records (type, inward/outward, direction, target key /
+  summary / status / type) and stores them as a JSON string in the `issuelinks`
+  metadata field. This powers the **Jira Cross-Linkage & SDLC Waste** analysis
+  (Module 4) in Skill #2.
+- **Image / schema extraction:** with `--save-images`, downloads image
+  attachments (architecture/workflow schemas) into `<db-path>/<assets-dir>` and
+  records local path + source URL in the page metadata.
+- If the DB folder does not exist, it is created automatically.
+- Missing Python deps are auto-installed on startup.
+
+---
+
+## 3. Skill #2 — Analyst (Dashboard Generation)
+
+**Tool:** [`analyze_agent.py`](analyze_agent.py)
+
+Reads the project's local ChromaDB **from the local DB only** (no live API
+calls) and produces:
+1. **Interactive HTML dashboard** → `analytics_dashboard.html`
+2. **OLAP data cube** → `jira_data_cube.csv`
+
+Both outputs are written **inside the resolved project folder**
+(`./vector_dbs/<alias|project-key>/`), together with the ChromaDB itself — so
+all data of one project lives in one place and never mixes with other projects.
+Re-running for the same project updates that folder; a new project gets a new
+folder.
+
+### 3.1 CLI Command Templates / Шаблоны CLI-команд
+
+```bash
+# Generate dashboard + OLAP cube for the project alias from .env
+python analyze_agent.py
+
+# Explicit alias (overrides .env) -> ./vector_dbs/EMPRelocation
+python analyze_agent.py --alias EMPRelocation
+
+# Explicit ChromaDB folder
+python analyze_agent.py --db-path ./vector_dbs/EPMRLCT
+
+# Only regenerate the dashboard (skip OLAP)
+python analyze_agent.py --skip-olap
+
+# OLAP cube only
+python analyze_agent.py --skip-dashboard
+
+# Dry-run (print only, no files written)
+python analyze_agent.py --dry-run
+
+# Show all options
+python analyze_agent.py --help
+```
+
+### 3.2 Key Arguments / Ключевые аргументы
+
+| Flag | Purpose | Default |
+|------|---------|---------|
+| `--db-path` | Explicit ChromaDB folder | auto (see resolution) |
+| `--alias` | Project alias folder | from `.env` (`PROJECT_ALIAS`) |
+| `--output` | Dashboard output path (relative → inside project folder) | `analytics_dashboard.html` |
+| `--cube-out` | OLAP cube CSV path (relative → inside project folder) | `jira_data_cube.csv` |
+| `--jira-collection` | Jira collection | `product_jira` |
+| `--reports-collection` | Jira reports collection | `product_jira_reports` |
+| `--confluence-collection` | Confluence collection | `product_knowledge` |
+| `--env-file` | `.env` path | `./.env` |
+| `--skip-olap` | Skip OLAP analysis | off |
+| `--skip-dashboard` | Skip dashboard generation | off |
+| `--dry-run` | Print only, do not write | off |
+
+### 3.3 Dashboard Architecture & Widget Registry
+
+The generated dashboard is a fully interactive, standalone HTML file with three
+tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
+
+- **Tab 1 — Product Analytics (PO/BA):** Strategy, Architecture (with images),
+  Requirements, Found Artifacts (pure text extraction, source links mandatory).
+- **Tab 2 — Metrics & Delivery (PM):** CFD, Cycle/Lead Time (from changelog),
+  Throughput, Velocity, Backlog Health, Scope Change Volume, Bug Growth,
+  Defect Age, Quality Debts, Project Jira Reports.
+- **Tab 3 — Jira Data Profile:** Schema & Field Usage, Core Workflows (Mermaid),
+  Heuristic Associations, SDLC Process Matrix (Issue Type × Status), Field
+  Dependencies & Trends, Transition Frequency, Time-in-Status, OLAP
+  Slice & Dice constructor, and **Event-Driven Analytics** (section 8).
+
+### 3.5 Event-Driven Analytics (Tab 3, section 8)
+
+Advanced event/trigger analysis computed from the Jira changelog + parent-child
+relationships. Requires `parent_key` in the Jira metadata (populated by
+`sync_agent.py`). If no parent data is present, the affected widgets render
+"N/A" gracefully.
+
+- **Module 1 — Jira Defect Causality & SDLC Triggers** (three sub-widgets).
+  The parent ("Target Scope") of every defect is resolved by **hard linkage**:
+  - **Sub-Bug** → uses the system `parent` field (its Bug/Story/Task).
+  - **Bug** → if `parent` is empty, scans `issuelinks` for a linked Story/Task
+    (`is blocked by` / `relates to` / `associated` / `depends`); the first such
+    Story/Task becomes the parent feature.
+  - **(a) Story Status at Defect Birth (Doughnut):** for each Bug/Sub-Bug, the
+    parent's status at the exact second the defect was created (from the
+    parent's changelog, defaulting to `Open`). Answers "in which phases do our
+    stories generate bugs?".
+  - **(b) Sub-task Closure Automation Tracker (Callout cards + Mermaid flow):**
+    for each Story/Task with Sub-task children, `T_last_child = max(updated)`
+    among children in `Closed`/`Resolved`; if the parent's status changed within
+    **≤600 s (10 min)** it is an **automation trigger**, otherwise **Manual
+    Stagnation** (broken automation). Shows `X% auto / Y% stuck`.
+  - **(c) Sub-Bug Creation Constraints Validation (Data grid):** for each
+    `[Story/Task/Bug → Sub-Bug]` pair, captures the parent's status at the
+    Sub-Bug's creation second and tests the hypothesis that Sub-Bugs are created
+    only while the parent is `In Testing` (100%). Rejects the hypothesis with
+    the real status distribution if not 100%.
+- **Module 2 — Auto-transit / Parent-Child sync (Stacked bar + Mermaid flow):**
+  groups Sub-tasks by parent; for each parent finds the last closed child's
+  timestamp, then measures how long the parent takes to change status afterward.
+  A transition within **≤300 s (5 min)** is an **Automation Rule (auto)**;
+  otherwise it is **Manual Leakage (manual)**. Renders a target-status flow graph
+  with the auto/manual split on each edge.
+- **Module 3 — Metadata impact (Bubble chart):** splits issues into cohorts by
+  label (labels appearing in ≥3 issues only), computing each cohort's **median
+  cycle time** and **ping-pong (rework) rate** versus the project baseline.
+  Cohorts above baseline in BOTH dimensions are flagged **⚠️ High Risk Scope**
+  and highlighted red.
+- **Module 4 — Jira Cross-Linkage & SDLC Waste (Doughnut + callout cards +
+  Mermaid network):** classifies every `issuelinks` record across ALL issues
+  (horizontal links, not just the vertical parent/child hierarchy) into 4
+  macro-categories of SDLC waste:
+  - **A · Hard Blockers** (`blocks`, `is blocked by`, `Depend`) — computes
+    **blocker reaction time** (blocker created → blocked issue In Progress) and
+    the **stagnation rate** for targets that stayed in backlog **>24 working
+    hours**.
+  - **B · Process Rework** (`causes`, `is caused by`) — counts **escaped
+    defects** (a cause created *after* its source issue was closed).
+  - **C · Scope Duplication** (`duplicates`, `clones`, `Cloners`) — computes
+    **Waste Scope** = sunk hours/days spent In Progress on issues later closed
+    with resolution `Duplicate`/`Won't Fix`.
+  - **D · Soft Associations** (`relates to`, `Related To`, `Part of`) — builds a
+    **closure sync matrix** (ratio of linked pairs closed within the same
+    month).
+  Renders a category-distribution doughnut, one **Process Waste callout card**
+  per category (each shows "N/A" when the category is absent), and an
+  **interdependence network** (Mermaid graph, edges colored by category, capped
+  at 60 visible / 400 collected). Requires `issuelinks` metadata (populated by
+  `sync_agent.py`).
+
+**Mandatory rules:**
+- **Source links:** every finding/claim must carry a clickable source `url`
+  from metadata; if unavailable, render "N/A".
+- **Per-tab data-source header:** each tab shows the Chroma DB path, collection,
+  HNSW folder id, and folder size in MB.
+- **Data completeness:** if data is missing, render "N/A" inside the widget —
+  never guess or break the layout.
+- **Biweekly (2-week) bucketing:** time-series metrics (Opened vs Resolved,
+  Throughput, Velocity, Scope Change) use ISO weeks grouped into 2-week buckets
+  (e.g. `2025-W01-02`).
+- **Changelog-based metrics:** Cycle Time = first Done/Closed − first In
+  Progress; Lead Time = first Done/Closed − created (from changelog, not
+  created/resolution alone).
+
+### 3.4 OLAP Analyser
+
+The OLAP analyser is **inlined inside `analyze_agent.py`** and runs automatically
+(unless `--skip-olap`). It computes field density, status frequency, median
+time-in-status, transition frequency (incl. ping-pong), and a multidimensional
+pivot cube (`Issue Type × Status → count`) saved to CSV. It additionally emits a
+**cross-linkage cube** (`Issue Type × Link Category A/B/C/D → count`) saved to
+`<cube>_crosslink.csv` when `issuelinks` metadata is present.
+
+---
+
+## 4. Role Models / Ролевые модели
+
+Instructions for external AI agents on how to interpret the generated dashboard
+in the roles of **Senior PO/BA** and **Senior PM**.
+
+### 4.1 Senior PO / BA (Product Owner / Business Analyst)
+
+Focus on **Tab 1 — Product Analytics** and the product-oriented parts of
+**Tab 3 (Jira Data Profile)**.
+
+**How to interpret:**
+1. **Strategy:** read the Executive Product Vision, Core Value Proposition,
+   Target Audience, Business Sponsors, and Strategic Goals. Always cite the
+   source document URL.
+2. **Architecture:** review the modules/integrations blueprint and any rendered
+   architecture/schema images (C4 diagrams). Understand the system boundaries
+   and dependencies.
+3. **Requirements:** use the Product Capabilities matrix to map business value
+   to actual capabilities. Trace each capability to its source.
+4. **Found Artifacts:** treat this as the authoritative inventory of valuable
+   data (metrics tools, success criteria, stakeholders, links, team contacts)
+   extracted directly from the source documents — **no AI inference or gap
+   assumptions**. Use source links to verify.
+5. **Jira Data Profile (Tab 3):** interpret the Issue Type × Status matrix,
+   field-fill trends, and state machines to understand how the team actually
+   works vs. how it is documented.
+
+**Deliverables:** a product narrative, gap analysis based ONLY on sourced
+facts, capability-to-value mapping, and stakeholder communication materials.
+
+### 4.2 Senior PM (Program / Delivery Manager)
+
+Focus on **Tab 2 — Metrics & Delivery** and the delivery-health widgets.
+
+**How to interpret:**
+1. **Delivery:** read the Cumulative Flow Diagram, Cycle Time, and Lead Time
+   (both from changelog). Cycle Time = active work duration; Lead Time = total
+   lifetime incl. queue wait. A large gap indicates queue/backlog bottlenecks.
+2. **Scope & Predictability:** interpret Throughput, Velocity, Average Velocity,
+   Backlog Health ("Ready for Development"), and Scope Change Volume (average
+   changed issues per 2-week/sprint). High scope change = unstable planning.
+3. **Quality & Tech Debt:** interpret Bug Growth, Defect Age by Priority,
+   Defect Containment/Leakage (prod-tagged bugs), Security Posture (SAST/CWE),
+   and Quality Debts. Rising leakage or stagnant defects = quality risk.
+4. **Project Jira Reports:** use Control Chart, Epic Report, Velocity, CFD,
+   Scope Change, Forecast, Sprint reports (where available via the API) to
+   validate the computed metrics.
+5. **SDLC Process Matrix:** use the Issue Type × Status heatmap and the
+   Value Stream Mapping Gaps (Stories Leakage into Sub-Bugs, Backlog
+   Stagnation, Isolated Security Loop) to spot process health risks.
+
+**Deliverables:** delivery health assessment, bottleneck identification,
+forecasting (velocity-based), and actionable PM recommendations grounded in the
+sourced metrics.
+
+### 4.3 General Rules / Общие правила
+
+- **Always cite sources:** attach the source `url` to every claim.
+- **Respect "N/A":** if a widget shows "N/A", do not fabricate numbers.
+- **Biweekly lens:** prefer 2-week periods for capacity/velocity narratives.
+- **Actionable, not generic:** tie every recommendation to a specific metric
+  and its source.
+
+---
+
+*DEDAA — Data Extraction & Delivery Analytics Agent. Autonomous CLI utilities
+for Atlassian data extraction and analytics dashboard generation.*
