@@ -21,7 +21,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# NOTE: DEDAA/lib/ is the dashboard SOURCE (chart_render/chart_config/…),
+# NOT a Python build directory — keep it tracked.
 lib64/
 parts/
 sdist/
