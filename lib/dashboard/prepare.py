@@ -124,16 +124,17 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         for k, s, p, u in jm["backlog_ready"][:15]
     ) or "<tr><td colspan='3'>None</td></tr>"
 
-    # [P16] Aging rows: Issue | Description | Status | Link | Age.
+    # [P17] Aging rows: Issue | Summary | Priority | Status | Link | Age.
     # The aging tuple is (age, key, summary, status, prio, url) — the old
     # render mislabeled summary as Status and priority as Priority and built
-    # the link from the priority field. Priority is dropped (did not fit),
-    # Age moves LAST.
+    # the link from the priority field. Priority sits BEFORE Status (the
+    # widget is full-width now, so it fits); Age stays LAST.
     aging_rows = "".join(
-        f"<tr><td>{esc(k)}</td><td>{esc(sm)}</td><td>{esc(s)}</td>"
+        f"<tr><td>{esc(k)}</td><td>{esc(sm)}</td><td>{esc(p)}</td>"
+        f"<td>{esc(s)}</td>"
         f"<td><a href='{esc(u)}' target='_blank'>link</a></td><td>{d}d</td></tr>"
         for d, k, sm, s, p, u in jm["aging"][:15]
-    ) or "<tr><td colspan='5'>None</td></tr>"
+    ) or "<tr><td colspan='6'>None</td></tr>"
 
     # Open bugs by priority
     open_bug_prio = jm["open_bug_by_prio"]
@@ -174,24 +175,29 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
                 + quote(jql_full, safe="") + '">' + esc(label)
                 + ' → Jira</a>')
 
+    # [P17] Each link opens EXACTLY the issues the widget's metric counts.
     jql_links = {
-        # open bugs (any priority, not resolved)
+        # open bugs (any priority, not resolved) — the open-bug population
         "open_bugs": _jql_link(
             "issuetype in (Bug, Sub-bug) AND resolution is EMPTY",
-            "Open bugs"),
-        # defect age uses the same open-bug population
+            "Open defects"),
+        # defect age: the same open-bug population feeds the age stats
         "defect_age": _jql_link(
             "issuetype in (Bug, Sub-bug) AND resolution is EMPTY",
-            "Open bugs (age source)"),
-        # production leakage: prod-labelled bugs
+            "Open defects (age source)"),
+        # production leakage: exactly the prod-labelled (leaked) defects
         "leakage": _jql_link(
             "labels = prod AND issuetype in (Bug, Sub-bug)",
-            "Prod-tagged bugs"),
-        # SAST / security posture + CWE findings
+            "Leaked (prod-tagged) defects"),
+        # security posture: SAST-tool labels OR security-type issues
         "security": _jql_link(
-            'labels in (sast, gitleaks, checkmarx_cxsast, snyk) OR '
-            'issuetype = "Security Issue"',
+            'labels in (sast, gitleaks, checkmarx, checkmarx_cxsast, snyk) '
+            'OR issuetype in ("Security Issue", "Vulnerability", "Security")',
             "SAST/security issues"),
+        # CWE findings: only the CWE-labelled findings feed the CWE widget
+        "cwe": _jql_link(
+            'labels starts with "cwe-"',
+            "CWE findings"),
     }
 
     # Product content
