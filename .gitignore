@@ -56,9 +56,14 @@ htmlcov/
 
 # Project data — per-project ChromaDB folders, OLAP cubes and generated
 # dashboards are runtime artifacts and must never be committed.
+# [P14] Default artifact names are project-prefixed:
+#   <project>_analytics_dashboard.html / <project>_jira_data_cube.csv
 vector_dbs/
 analytics_dashboard.html
 jira_data_cube.csv
 **/analytics_dashboard.html
 **/jira_data_cube.csv
+**/*_analytics_dashboard.html
+**/*_jira_data_cube.csv
+**/*_jira_data_cube_crosslink.csv
 chroma.sqlite3

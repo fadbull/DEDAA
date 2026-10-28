@@ -12,7 +12,9 @@ Usage examples
   python analyze_agent.py --help
 """
 import os
-from lib.config import build_parser, load_dotenv, resolve_db_path, _require_deps
+from lib.config import (build_parser, load_dotenv, resolve_db_path,
+                        _require_deps, DEFAULT_OUTPUT, DEFAULT_CUBE,
+                        default_dashboard_name, default_cube_name)
 from lib.runners import run_olap, run_dashboard
 
 
@@ -26,12 +28,21 @@ def main():
     _require_deps()
 
     db_path = resolve_db_path(args)
+    # [P14] Default artifact names carry the project prefix (the ChromaDB
+    # folder basename): <project>_analytics_dashboard.html and
+    # <project>_jira_data_cube.csv — dashboards/cubes accumulated across
+    # many projects stay distinguishable. An explicit --output / --cube-out
+    # is honored verbatim (only the plain default is replaced).
+    dash_name = (default_dashboard_name(db_path)
+                 if args.output == DEFAULT_OUTPUT else args.output)
+    cube_name = (default_cube_name(db_path)
+                 if args.cube_out == DEFAULT_CUBE else args.cube_out)
     # Resolve dashboard + cube outputs INSIDE the project folder so all of a
     # project's artifacts stay together (never mixed across projects).
-    output = (os.path.join(db_path, args.output)
-              if not os.path.isabs(args.output) else args.output)
-    cube_out = (os.path.join(db_path, args.cube_out)
-                if not os.path.isabs(args.cube_out) else args.cube_out)
+    output = (os.path.join(db_path, dash_name)
+              if not os.path.isabs(dash_name) else dash_name)
+    cube_out = (os.path.join(db_path, cube_name)
+                if not os.path.isabs(cube_name) else cube_name)
     print("=" * 70)
     print(" analyze_agent (Skill #2)")
     print(f" db_path    : {db_path}")

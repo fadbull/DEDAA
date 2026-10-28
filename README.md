@@ -93,7 +93,8 @@ DEDAA/
 >
 > **Per-project isolation:** every project (alias / key) gets its own folder
 > `./vector_dbs/<alias|project-key>/`. The ChromaDB, the generated dashboard
-> `analytics_dashboard.html` and the OLAP cube `jira_data_cube.csv` are all
+> `<project>_analytics_dashboard.html` and the OLAP cube
+> `<project>_jira_data_cube.csv` are all
 > written **inside that project folder** — so data from different projects never
 > mix. Re-running the tools for the same project updates that folder; a new
 > project creates a new folder.
@@ -213,7 +214,10 @@ python sync_agent.py --help
 ## Skill #2 — `analyze_agent.py` (Analytics & Dashboard)
 
 Reads the project's local ChromaDB and produces BOTH the interactive dashboard
-(`analytics_dashboard.html`) AND the OLAP data cube (`jira_data_cube.csv`).
+(`<project>_analytics_dashboard.html`) AND the OLAP data cube
+(`<project>_jira_data_cube.csv`) — the project prefix (the ChromaDB folder
+basename: alias or Jira key) keeps dashboards/cubes of many investigated
+projects distinguishable.
 Both outputs are written **inside the resolved project folder**
 (`./vector_dbs/<alias|project-key>/`), so all of a project's data stays in one
 place. The dashboard's **Process Metrics — Trends** widget (Metrics & Delivery
@@ -236,7 +240,9 @@ See [`skills_manifest.md`](skills_manifest.md) for the full specification.
 
 ```bash
 # Generate dashboard + OLAP cube for the project alias from .env
-# -> ./vector_dbs/<folder-alias>/{analytics_dashboard.html, jira_data_cube.csv}
+# -> ./vector_dbs/<folder-alias>/{
+#      <folder-alias>_analytics_dashboard.html,
+#      <folder-alias>_jira_data_cube.csv}
 python analyze_agent.py
 
 # Explicit alias (overrides .env) -> ./vector_dbs/<folder-alias>
@@ -261,8 +267,8 @@ python analyze_agent.py --help
 |------|---------|---------|
 | `--db-path` | Project ChromaDB folder (outputs written inside it) | auto: `--alias` / `PROJECT_ALIAS` / `JIRA_PROJECT` / `.env` |
 | `--alias` | Project alias folder | from `.env` (`PROJECT_ALIAS`) |
-| `--output` | Dashboard path (relative → inside project folder) | `analytics_dashboard.html` |
-| `--cube-out` | OLAP cube CSV path (relative → inside project folder) | `jira_data_cube.csv` |
+| `--output` | Dashboard path (relative → inside project folder) | `<project>_analytics_dashboard.html` |
+| `--cube-out` | OLAP cube CSV path (relative → inside project folder) | `<project>_jira_data_cube.csv` |
 | `--jira-collection` | Jira collection | `product_jira` |
 | `--reports-collection` | Jira reports collection | `product_jira_reports` |
 | `--confluence-collection` | Confluence collection | `product_knowledge` |

@@ -17,8 +17,36 @@ DEFAULT_DB_PATH = os.path.abspath(
 # Dashboard + OLAP cube are written INSIDE the resolved project folder, so that
 # ALL artifacts of one project (ChromaDB + cube CSV + dashboard HTML) live
 # together in ./vector_dbs/<alias|project-key>/ — never mixed across projects.
+# [P14] The DEFAULT artifact names carry the project prefix — the ChromaDB
+# folder basename (whatever identified the project at first extraction:
+# alias / project key / DB_PATH folder) — so dashboards and cubes accumulated
+# across many projects are distinguishable at a glance.
 DEFAULT_OUTPUT = "analytics_dashboard.html"
 DEFAULT_CUBE = "jira_data_cube.csv"
+# Legacy root folder (no project identity) keeps the unprefixed names.
+_LEGACY_DB_DIRNAME = os.path.basename(DEFAULT_DB_PATH)
+
+
+def project_artifact_prefix(db_path):
+    """[P14] The project prefix for default artifact names: the ChromaDB
+    folder basename (the same identity that named the folder), slugified.
+    Empty for the legacy root, '.' or an empty path (no project identity)."""
+    raw = os.path.basename(os.path.normpath(str(db_path or "")))
+    if not raw or raw == "." or raw == _LEGACY_DB_DIRNAME:
+        return ""
+    return _slugify(raw)
+
+
+def default_dashboard_name(db_path):
+    """[P14] `<project>_analytics_dashboard.html` (unprefixed fallback)."""
+    prefix = project_artifact_prefix(db_path)
+    return (prefix + "_" + DEFAULT_OUTPUT) if prefix else DEFAULT_OUTPUT
+
+
+def default_cube_name(db_path):
+    """[P14] `<project>_jira_data_cube.csv` (unprefixed fallback)."""
+    prefix = project_artifact_prefix(db_path)
+    return (prefix + "_" + DEFAULT_CUBE) if prefix else DEFAULT_CUBE
 
 def load_dotenv(path=".env"):
     """Load KEY=VALUE pairs from a .env file into os.environ (no overwrite)."""
@@ -166,7 +194,10 @@ def build_parser():
         "--output",
         help=(
             "Output dashboard path. A relative path is resolved inside the "
-            f"project folder. [default: {DEFAULT_OUTPUT} in project folder]"
+            "project folder. [P14] The DEFAULT name is prefixed with the "
+            "project (the ChromaDB folder basename): "
+            "<project>_analytics_dashboard.html — pass an explicit --output "
+            "to override it verbatim."
         ),
         default=DEFAULT_OUTPUT,
     )
@@ -174,7 +205,8 @@ def build_parser():
         "--cube-out",
         help=(
             "Output OLAP cube CSV path. A relative path is resolved inside the "
-            f"project folder. [default: {DEFAULT_CUBE} in project folder]"
+            "project folder. [P14] The DEFAULT name is prefixed with the "
+            "project: <project>_jira_data_cube.csv inside the project folder."
         ),
         default=DEFAULT_CUBE,
     )

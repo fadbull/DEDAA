@@ -190,8 +190,14 @@ python sync_agent.py --help
 
 Reads the project's local ChromaDB **from the local DB only** (no live API
 calls) and produces:
-1. **Interactive HTML dashboard** → `analytics_dashboard.html`
-2. **OLAP data cube** → `jira_data_cube.csv`
+1. **Interactive HTML dashboard** → `<project>_analytics_dashboard.html`
+2. **OLAP data cube** → `<project>_jira_data_cube.csv`
+
+> **[P14] Project-prefixed defaults:** the default artifact names carry the
+> project prefix (the ChromaDB folder basename — alias or Jira key), so
+> dashboards/cubes accumulated across many investigated projects are
+> distinguishable. An explicit `--output` / `--cube-out` overrides the
+> default verbatim.
 
 Both outputs are written **inside the resolved project folder**
 (`./vector_dbs/<alias|project-key>/`), together with the ChromaDB itself — so
@@ -230,8 +236,8 @@ python analyze_agent.py --help
 |------|---------|---------|
 | `--db-path` | Explicit ChromaDB folder | auto (see resolution) |
 | `--alias` | Project alias folder | from `.env` (`PROJECT_ALIAS`) |
-| `--output` | Dashboard output path (relative → inside project folder) | `analytics_dashboard.html` |
-| `--cube-out` | OLAP cube CSV path (relative → inside project folder) | `jira_data_cube.csv` |
+| `--output` | Dashboard output path (relative → inside project folder) | `<project>_analytics_dashboard.html` |
+| `--cube-out` | OLAP cube CSV path (relative → inside project folder) | `<project>_jira_data_cube.csv` |
 | `--jira-collection` | Jira collection | `product_jira` |
 | `--reports-collection` | Jira reports collection | `product_jira_reports` |
 | `--confluence-collection` | Confluence collection | `product_knowledge` |
