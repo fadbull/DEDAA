@@ -42,7 +42,6 @@ Both tools:
 DEDAA/
 ├── sync_agent.py              # Skill #1 — thin CLI: parse → deps → run_sync
 ├── analyze_agent.py           # Skill #2 — thin CLI: parse → deps → run_dashboard/run_olap
-├── process_metrics_tool.py    # Standalone process-metrics CLI helper
 ├── requirements.txt           # Python dependencies
 ├── .env.example               # Configuration template (copy to .env)
 ├── .gitignore                 # Ignores .env*, venvs, runtime artifacts
