@@ -24,7 +24,8 @@ terminal:
 | [`analyze_agent.py`](analyze_agent.py) | #2 | Read project ChromaDB → interactive dashboard + OLAP cube |
 
 Both tools:
-- Are fully self-contained Python scripts with built-in `--help`.
+- Are thin CLI entry points (all logic in `lib/`) with built-in `--help`
+  that works without the heavy dependencies installed.
 - Resolve the project ChromaDB folder from `--db-path` / `--alias` / `.env`
   (`PROJECT_ALIAS`, `JIRA_PROJECT`, `DB_PATH`).
 - Access ChromaDB **directly via the Python `chromadb` library** (no MCP, no
@@ -39,13 +40,46 @@ Both tools:
 
 ```
 DEDAA/
-├── sync_agent.py              # Skill #1 — Synchronizer (data extraction)
-├── analyze_agent.py           # Skill #2 — Analyst (dashboard + OLAP) — fully self-contained
+├── sync_agent.py              # Skill #1 — thin CLI: parse → deps → run_sync
+├── analyze_agent.py           # Skill #2 — thin CLI: parse → deps → run_dashboard/run_olap
+├── process_metrics_tool.py    # Standalone process-metrics CLI helper
 ├── requirements.txt           # Python dependencies
 ├── .env.example               # Configuration template (copy to .env)
-├── .gitignore                 # Ignores .env* and vector DBs
+├── .gitignore                 # Ignores .env*, venvs, runtime artifacts
 ├── README.md                  # This file
 ├── skills_manifest.md         # Full rules manifest for external AI agents (EN+RU)
+├── lib/                       # Shared sub-package (both skills)
+│   ├── config.py              #   dotenv, CLI parsers, dep management, db-path resolution
+│   ├── chromadb_utils.py      #   ChromaDB loading / collection resolution
+│   ├── date_utils.py          #   Date parsing, bucketing, status grouping
+│   ├── compute_jira.py        #   PM metrics from Jira issues (Skill #2)
+│   ├── compute_product.py     #   compute_product(), compute_reports()
+│   ├── compute_artifacts.py   #   Confluence text scanning (Skill #2)
+│   ├── compute_profile.py     #   Jira data profile (field density, workflows)
+│   ├── compute_events.py      #   Event-driven analytics (bug triggers, sync)
+│   ├── compute_crosslink.py   #   Cross-linkage / SDLC waste analysis
+│   ├── dashboard_helpers.py   #   esc(), js_list(), json_str() helpers
+│   ├── dashboard_html.py      #   Dashboard shell assembly
+│   ├── olap_analyser.py       #   OLAP cube: load_issues(), time-in-status, pivot
+│   ├── runners.py             #   run_olap(), run_dashboard() orchestration
+│   ├── atlassian_api.py       #   AtlassianAPI HTTP client (Skill #1)
+│   ├── sync_jira.py           #   Jira issues + versions + reports
+│   ├── sync_confluence.py     #   Confluence pages/space/images
+│   ├── sync_ingest.py         #   Ingest + incremental-sync markers
+│   ├── sync_runners.py        #   run_sync() dispatch
+│   └── dashboard/             #   Dashboard renderer sub-package
+│       ├── prepare.py         #     build_dashboard() render context (Tab 1/3)
+│       ├── trends_data.py     #     Trends widget data prep (Tab 2)
+│       ├── scripts_tab3.py    #     Tab 3 inline scripts
+│       ├── chart_config.py    #     RC_CFG / RC_TIP / RC_TIP_BOX / RC_REF_LINES
+│       ├── chart_render.py    #     rcApply() — aggregation, state, rendering
+│       ├── derive.py          #     rcDeriveAll() — per-metric item derivation
+│       ├── granularity.py     #     buckets, dims, rcItemTeams
+│       ├── metric_settings.py #     RC_SETTINGS_DEFAULT schema + validation
+│       ├── settings_metric.py #     Metric settings panel + rcTipFor/rcFormulaText
+│       ├── settings_widget.py #     Widget settings panel
+│       ├── cfd_widget.py      #     Cumulative Flow Diagram widget
+│       └── shell.py           #     HTML shell, tabs, CSS
 └── vector_dbs/                # One folder PER project (ChromaDB + dashboard + cube)
     └── EMPRelocation/         # Example project folder — ALL of its data lives here
         ├── chroma.sqlite3     #   ChromaDB (product_jira, product_knowledge, ...)
@@ -55,9 +89,9 @@ DEDAA/
         └── jira_data_cube.csv        #   Generated OLAP cube (Skill #2)
 ```
 
-> `analyze_agent.py` is a **single self-contained file (~2800 lines)** that inlines
-> all Skill #2 logic (dashboard metric computations, HTML renderer, and the OLAP
-> data-cube analyser). No separate modules are required.
+> Both agents are **thin CLI entry points**; all logic lives in the `lib/`
+> sub-package (compute_*, dashboard/, sync_* modules). The refactor plans and
+> the QA harnesses live in the repository-level `plans/` folder.
 >
 > **Per-project isolation:** every project (alias / key) gets its own folder
 > `./vector_dbs/<alias|project-key>/`. The ChromaDB, the generated dashboard
@@ -184,16 +218,23 @@ Reads the project's local ChromaDB and produces BOTH the interactive dashboard
 (`analytics_dashboard.html`) AND the OLAP data cube (`jira_data_cube.csv`).
 Both outputs are written **inside the resolved project folder**
 (`./vector_dbs/<alias|project-key>/`), so all of a project's data stays in one
-place. The dashboard's **Jira Data Profile** tab includes **Event-Driven
-Analytics** — bug-creation triggers (parent status at bug creation), auto-transit
-/ parent-child sync (automation rules vs manual leakage), label/custom-field
-impact on cycle time and rework, and a **Jira Cross-Linkage & SDLC Waste
-Dashboard** that classifies every `issuelinks` record into 4 macro-categories
-(A Hard Blockers, B Process Rework, C Scope Duplication, D Soft Associations)
-with per-category waste metrics, an interdependence network, and a terminal
-summary table. The OLAP analyser also emits a cross-linkage cube
-(`jira_data_cube_crosslink.csv`). See
-[`skills_manifest.md`](skills_manifest.md) for the full specification.
+place. The dashboard's **Process Metrics — Trends** widget (Metrics & Delivery
+tab) renders 20 Jira-derived process metrics — Requirements Cycle/Rework,
+Issue Lead Time, Throughput, Velocity, Cycle Time, Backlog Health, Design
+Review Turnaround, Bug Growth, Production Leakage, Bug Fixing Allocation,
+Incident Frequency, Time in QA, Defect Density, WIP, Flow Efficiency, Defect
+Escape Rate, Clarification/Review Cycle Count — with configurable periods
+(Daily…Annual), dimensions, Issue Type pools, two settings levels (Widget +
+Metric), healthy reference lines and trend conclusions with Δ%. The **Jira
+Data Profile** tab includes **Event-Driven Analytics** — bug-creation triggers
+(parent status at bug creation), auto-transit / parent-child sync (automation
+rules vs manual leakage), label/custom-field impact on cycle time and rework,
+and a **Jira Cross-Linkage & SDLC Waste Dashboard** that classifies every
+`issuelinks` record into 4 macro-categories (A Hard Blockers, B Process
+Rework, C Scope Duplication, D Soft Associations) with per-category waste
+metrics, an interdependence network, and a terminal summary table. The OLAP
+analyser also emits a cross-linkage cube (`jira_data_cube_crosslink.csv`).
+See [`skills_manifest.md`](skills_manifest.md) for the full specification.
 
 ```bash
 # Generate dashboard + OLAP cube for the project alias from .env

@@ -248,7 +248,9 @@ tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
 
 - **Tab 1 — Product Analytics (PO/BA):** Strategy, Architecture (with images),
   Requirements, Found Artifacts (pure text extraction, source links mandatory).
-- **Tab 2 — Metrics & Delivery (PM):** CFD, Cycle/Lead Time (from changelog),
+- **Tab 2 — Metrics & Delivery (PM):** the **Process Metrics — Trends** widget
+  (20 Jira-derived metrics with per-metric settings, healthy reference lines,
+  trend conclusions and Δ% — see below), CFD, Cycle/Lead Time (from changelog),
   Throughput, Velocity, Backlog Health, Scope Change Volume, Bug Growth,
   Defect Age, Quality Debts, Project Jira Reports.
 - **Tab 3 — Jira Data Profile:** Schema & Field Usage, Core Workflows (Mermaid),
@@ -256,7 +258,24 @@ tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
   Dependencies & Trends, Transition Frequency, Time-in-Status, OLAP
   Slice & Dice constructor, and **Event-Driven Analytics** (section 8).
 
-### 3.5 Event-Driven Analytics (Tab 3, section 8)
+**Process Metrics — Trends (Tab 2):** 20 metrics defined in
+`lib/dashboard/chart_config.py` (`RC_CFG`), derived per item in
+`lib/dashboard/derive.py` (`rcDeriveAll`), aggregated and rendered in
+`lib/dashboard/chart_render.py` (`rcApply`). Every metric supports the
+Periods selector (Daily / Weekly / Sprint / Monthly / Quarterly / Annual),
+the dimension selector (project / team / component / epic / person /
+issuetype), an Issue Type pool, and two settings levels (Widget settings +
+Metric settings, persisted to `localStorage['dedaa_metric_settings']`).
+Teams and story points are optional: the auto-modes (`denominator:auto`,
+`densityMode:auto`, `velocityMode:auto`) degrade to count-based calculations
+when the data lacks them. Healthy ranges render as static dashed reference
+lines; the trend conclusion prints Improving / Stable / Degrading (or the
+2–3 sprints band verdict for Backlog Health) plus a period-over-period Δ% —
+and never fabricates a verdict on an empty selection or an empty window
+(`RC_WIN_STATE` keeps the chart, tooltip, avg-box, conclusion and settings
+panel describing the same filtered-window state).
+
+### 3.4 Event-Driven Analytics (Tab 3, section 8)
 
 Advanced event/trigger analysis computed from the Jira changelog + parent-child
 relationships. Requires `parent_key` in the Jira metadata (populated by
@@ -323,16 +342,19 @@ relationships. Requires `parent_key` in the Jira metadata (populated by
   HNSW folder id, and folder size in MB.
 - **Data completeness:** if data is missing, render "N/A" inside the widget —
   never guess or break the layout.
-- **Biweekly (2-week) bucketing:** time-series metrics (Opened vs Resolved,
-  Throughput, Velocity, Scope Change) use ISO weeks grouped into 2-week buckets
-  (e.g. `2025-W01-02`).
-- **Changelog-based metrics:** Cycle Time = first Done/Closed − first In
-  Progress; Lead Time = first Done/Closed − created (from changelog, not
-  created/resolution alone).
+- **Configurable granularity:** the Process Metrics — Trends widget defaults to
+  2-week buckets (`2025-W01-02`) but the Periods selector switches to Daily /
+  Weekly / Sprint / Monthly / Quarterly / Annual; tooltips stay
+  granularity-neutral («per selected period»).
+- **Configurable status sets:** Cycle Time / Lead Time / QA / review metrics
+  read their start/end statuses from the Widget settings status sets (the
+  tooltip's dynamic Formula: section always shows the ACTUAL configured
+  statuses; the base tooltips use neutral wording like «first dev-start
+  status» / «first QA-exit status»).
 
-### 3.4 OLAP Analyser
+### 3.5 OLAP Analyser
 
-The OLAP analyser is **inlined inside `analyze_agent.py`** and runs automatically
+The OLAP analyser lives in `lib/olap_analyser.py` and runs automatically
 (unless `--skip-olap`). It computes field density, status frequency, median
 time-in-status, transition frequency (incl. ping-pong), and a multidimensional
 pivot cube (`Issue Type × Status → count`) saved to CSV. It additionally emits a
