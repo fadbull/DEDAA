@@ -55,6 +55,7 @@ def _render_html_shell(ctx):
     olap_link_rows_json = ctx['olap_link_rows_json']
     olap_rows_json = ctx['olap_rows_json']
     opened2 = ctx['opened2']
+    jql_links = ctx['jql_links']
     problem = ctx['problem']
     ready_count = ctx['ready_count']
     ready_rows = ctx['ready_rows']
@@ -204,7 +205,7 @@ def _render_html_shell(ctx):
       <section id="m-delivery" class="scroll-mt-24">
         <h2 class="text-lg font-semibold mb-3">Delivery""" + _tip("Delivery health at a glance: work-in-progress flow (CFD) and how long work takes to actually complete (Cycle Time) vs its total lifetime (Lead Time) — see the Process Metrics - Trends widget below.") + """</h2>
         <div class="grid md:grid-cols-2 gap-4">
-          <div class="widget">
+          <div class="widget md:col-span-2">
             <div class="flex items-center justify-between mb-2">
               <h3 class="font-medium mb-0">Cumulative Flow Diagram""" + _tip("A stacked area chart of Backlog, In Progress and Done over time. The vertical gap between adjacent bands is the work-in-progress (WIP); a widening band signals congestion, while a narrowing one signals flow. Flat 'In Progress' band = work is queued, not being done. Use the controls below to slice the diagram by period, calendar range, dimension and issue type.") + """</h3>
               <button onclick="cfdSettingsToggle()" class="text-gray-400 hover:text-gray-600" title="CFD settings">⚙</button>
@@ -411,8 +412,8 @@ def _render_html_shell(ctx):
           <div class="widget"><h3 class="font-medium mb-2">Top Areas / Components (work)""" + _tip("Where the work is concentrated: the top 12 components by issue count. Helps spot overloaded areas and understand the shape of the delivery portfolio.") + """</h3>
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Component</th><th>Issues</th></tr></thead><tbody>
             """ + ("".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in list(jm.get('by_component', {}).items())[:12]) or "<tr><td colspan='2'>N/A</td></tr>") + """</tbody></table></div>
-          <div class="widget"><h3 class="font-medium mb-2">Aging Issues (>30 days)""" + _tip("Issues that have stayed open for more than 30 days, with their current status and priority. Aging work is at risk of becoming stale, blocked, or forgotten — a candidate for escalation or de-scoping.") + """</h3>
-            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Age</th><th>Issue</th><th>Status</th><th>Priority</th><th>Link</th></tr></thead><tbody>""" + aging_rows + """</tbody></table></div>
+          <div class="widget md:col-span-2"><h3 class="font-medium mb-2">Aging Issues (>30 days)""" + _tip("Issues that have stayed open for more than 30 days: key, description, current status, link and age in days (oldest first). Aging work is at risk of becoming stale, blocked, or forgotten — a candidate for escalation or de-scoping.") + """</h3>
+            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Issue</th><th>Description</th><th>Status</th><th>Link</th><th>Age</th></tr></thead><tbody>""" + aging_rows + """</tbody></table></div>
         </div>
         <div class="widget mt-4"><h3 class="font-medium mb-2">Ready for Development — Items""" + _tip("The actual list of issues sitting in 'Ready for Development', with priority and a link to each. This is the groomed, startable queue the team should pull from next.") + """</h3>
           <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Issue</th><th>Priority</th><th>Link</th></tr></thead><tbody>""" + ready_rows + """</tbody></table>
@@ -422,24 +423,21 @@ def _render_html_shell(ctx):
       <section id="m-quality" class="scroll-mt-24">
         <h2 class="text-lg font-semibold mb-3">Quality & Technical Debt""" + _tip("The cost of quality: bug trends, defect aging, production leakage, and security findings. High values here erode velocity and inflate future maintenance.") + """</h2>
         <div class="grid md:grid-cols-2 gap-4">
-          <div class="widget"><h3 class="font-medium mb-2">Bug Growth (new vs resolved)""" + _tip("Compares new bugs opened vs bugs resolved over time (weekly). When new bugs outpace resolved, the defect backlog grows and quality is deteriorating.") + """</h3><div class="h-48"><canvas id="bugChart"></canvas></div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Open Bugs by Priority""" + _tip("Distribution of currently-open bugs across priority levels. A heavy high-priority slice means urgent defects are competing for capacity with planned work.") + """</h3><div class="h-48"><canvas id="bugPrioChart"></canvas></div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Average Defect Age by Priority""" + _tip("For open bugs of each priority, how old they are on average (days since created). Critical/High defects aging for a long time signal that serious issues are being neglected.") + """</h3>
+          <div class="widget md:col-span-2"><h3 class="font-medium mb-2">Bug Growth (new vs resolved)""" + _tip("Compares new bugs opened vs bugs resolved over time (weekly). When new bugs outpace resolved, the defect backlog grows and quality is deteriorating.") + """</h3><div class="h-64"><canvas id="bugChart"></canvas></div></div>
+          <div class="widget"><h3 class="font-medium mb-2">Open Bugs by Priority""" + _tip("Distribution of currently-open bugs across priority levels. A heavy high-priority slice means urgent defects are competing for capacity with planned work.") + """</h3>""" + jql_links.get("open_bugs", "") + """<div class="h-48"><canvas id="bugPrioChart"></canvas></div></div>
+          <div class="widget"><h3 class="font-medium mb-2">Average Defect Age by Priority""" + _tip("For open bugs of each priority, how old they are on average (days since created). Critical/High defects aging for a long time signal that serious issues are being neglected.") + """</h3>""" + jql_links.get("defect_age", "") + """
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Priority</th><th>Count</th><th>Avg Age</th></tr></thead><tbody>""" + defect_age_rows + """</tbody></table></div>
-          <div class="widget"><h3 class="font-medium mb-2">Production Leakage Rate""" + _tip("Bugs tagged 'Prod' indicate defects found in production (leaked past QA). The leakage rate = prod bugs ÷ total bugs × 100. A high rate means defects are escaping testing and reaching end users.") + """</h3>
+          <div class="widget"><h3 class="font-medium mb-2">Production Leakage Rate""" + _tip("Bugs tagged 'Prod' indicate defects found in production (leaked past QA). The leakage rate = prod bugs ÷ total bugs × 100. A high rate means defects are escaping testing and reaching end users.") + """</h3>""" + jql_links.get("leakage", "") + """
             <div class="na-box">""" + (
               f"{jm['defect_leakage_rate']:.1f}% leaked ({jm['prod_bugs']}/{jm['total_bugs']} prod bugs)"
               if jm.get('defect_leakage_rate') is not None else "N/A (no prod-tagged bugs)"
             ) + """</div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Security Posture (SAST/CWE)""" + _tip("SAST/CWE-labeled findings and open security issues. Counts the number of static-analysis findings, security-type issues, and how many remain open — a proxy for application security debt.") + """</h3>
+          <div class="widget"><h3 class="font-medium mb-2">Security Posture (SAST/CWE)""" + _tip("SAST/CWE-labeled findings and open security issues. Counts the number of static-analysis findings, security-type issues, and how many remain open — a proxy for application security debt.") + """</h3>""" + jql_links.get("security", "") + """
             <div class="na-box">""" + (
               f"{jm.get('sast_issues', 0)} SAST/CWE findings · {jm.get('sec_type_issues', 0)} security issues ({jm.get('sec_open', 0)} open)"
               if jm.get('sast_issues') else "N/A (no SAST/security data)"
             ) + """</div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Quality Debts (open defects by priority)""" + _tip("Number of open defects at each priority level. This is the live quality debt the team must pay down — high-priority open defects should be addressed first.") + """</h3>
-            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Priority</th><th>Open</th></tr></thead><tbody>
-            """ + "".join(f"<tr><td>{esc(p)}</td><td>{v}</td></tr>" for p, v in jm["open_bug_by_prio"].items()) + """</tbody></table></div>
-          <div class="widget"><h3 class="font-medium mb-2">Security Findings by CWE""" + _tip("Security findings grouped by CWE (Common Weakness Enumeration) code. Grouping by CWE reveals which vulnerability classes recur most and should be fixed at the root.") + """</h3>
+          <div class="widget"><h3 class="font-medium mb-2">Security Findings by CWE""" + _tip("Security findings grouped by CWE (Common Weakness Enumeration) code. Grouping by CWE reveals which vulnerability classes recur most and should be fixed at the root.") + """</h3>""" + jql_links.get("security", "") + """
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">CWE</th><th>Count</th></tr></thead><tbody>
             """ + ("".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in list(jm.get('cwe_by_code', {}).items())[:10]) or "<tr><td colspan='2'>N/A</td></tr>") + """</tbody></table></div>
         </div>

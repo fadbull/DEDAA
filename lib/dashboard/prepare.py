@@ -124,11 +124,15 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         for k, s, p, u in jm["backlog_ready"][:15]
     ) or "<tr><td colspan='3'>None</td></tr>"
 
-    # Aging
+    # [P16] Aging rows: Issue | Description | Status | Link | Age.
+    # The aging tuple is (age, key, summary, status, prio, url) — the old
+    # render mislabeled summary as Status and priority as Priority and built
+    # the link from the priority field. Priority is dropped (did not fit),
+    # Age moves LAST.
     aging_rows = "".join(
-        f"<tr><td>{d}d</td><td>{esc(k)}</td><td>{esc(s)}</td><td>{esc(p)}</td>"
-        f"<td><a href='{esc(u)}' target='_blank'>link</a></td></tr>"
-        for d, k, s, p, u, _ in jm["aging"][:15]
+        f"<tr><td>{esc(k)}</td><td>{esc(sm)}</td><td>{esc(s)}</td>"
+        f"<td><a href='{esc(u)}' target='_blank'>link</a></td><td>{d}d</td></tr>"
+        for d, k, sm, s, p, u in jm["aging"][:15]
     ) or "<tr><td colspan='5'>None</td></tr>"
 
     # Open bugs by priority
@@ -139,6 +143,56 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         for p, v in jm["defect_age"].items())
     if not defect_age_rows:
         defect_age_rows = "<tr><td colspan='3'>N/A</td></tr>"
+
+    # ---- [P16] Uniform Jira deep links (JQL) for the Quality widgets ------
+    def _jira_base():
+        """The Jira base URL, derived from any issue's stored
+        '<base>/browse/<key>' URL (no extra plumbing needed)."""
+        for tup in (jm.get("bugs") or jm.get("open_issues") or []):
+            u = tup[4] if len(tup) > 4 else None
+            if u and "/browse/" in u:
+                return u.rsplit("/browse/", 1)[0]
+        return None
+
+    def _proj_key():
+        for tup in (jm.get("bugs") or jm.get("open_issues") or []):
+            k = tup[0] if tup else None
+            if k and "-" in str(k):
+                return str(k).split("-")[0]
+        return None
+
+    def _jql_link(jql, label):
+        """Uniform '<label> → Jira' link opening the JQL in Jira."""
+        base = _jira_base()
+        if not base:
+            return ""
+        from urllib.parse import quote
+        pk = _proj_key()
+        jql_full = (f"project = {pk} AND " + jql) if pk else jql
+        return ('<a class="text-xs text-blue-600 hover:underline" '
+                'target="_blank" href="' + esc(base) + '/issues/?jql='
+                + quote(jql_full, safe="") + '">' + esc(label)
+                + ' → Jira</a>')
+
+    jql_links = {
+        # open bugs (any priority, not resolved)
+        "open_bugs": _jql_link(
+            "issuetype in (Bug, Sub-bug) AND resolution is EMPTY",
+            "Open bugs"),
+        # defect age uses the same open-bug population
+        "defect_age": _jql_link(
+            "issuetype in (Bug, Sub-bug) AND resolution is EMPTY",
+            "Open bugs (age source)"),
+        # production leakage: prod-labelled bugs
+        "leakage": _jql_link(
+            "labels = prod AND issuetype in (Bug, Sub-bug)",
+            "Prod-tagged bugs"),
+        # SAST / security posture + CWE findings
+        "security": _jql_link(
+            'labels in (sast, gitleaks, checkmarx_cxsast, snyk) OR '
+            'issuetype = "Security Issue"',
+            "SAST/security issues"),
+    }
 
     # Product content
     def page_text(title):
@@ -1223,6 +1277,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     ctx['db_path'] = db_path
     ctx['db_size_mb'] = db_size_mb
     ctx['defect_age_rows'] = defect_age_rows
+    ctx['jql_links'] = jql_links
     ctx['epic_report_html'] = epic_report_html
     ctx['forecast_chart_html'] = forecast_chart_html
     ctx['link_caps'] = link_caps
