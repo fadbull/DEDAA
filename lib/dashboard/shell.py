@@ -202,7 +202,7 @@ def _render_html_shell(ctx):
     <div class="flex-1 space-y-8">
 
       <section id="m-delivery" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">Delivery""" + _tip("Delivery health at a glance: work-in-progress flow (CFD), throughput balance (Opened vs Resolved), and how long work takes to actually complete (Cycle Time) vs its total lifetime (Lead Time).") + """</h2>
+        <h2 class="text-lg font-semibold mb-3">Delivery""" + _tip("Delivery health at a glance: work-in-progress flow (CFD) and how long work takes to actually complete (Cycle Time) vs its total lifetime (Lead Time) — see the Process Metrics - Trends widget below.") + """</h2>
         <div class="grid md:grid-cols-2 gap-4">
           <div class="widget">
             <div class="flex items-center justify-between mb-2">
@@ -260,7 +260,6 @@ def _render_html_shell(ctx):
             <div class="h-64"><canvas id="cfdChart"></canvas></div>
             <p id="cfdAxisNote" class="text-xs text-gray-500 mt-1">Stacked areas: Backlog / In Progress / Done at each period end. X-axis: sprint buckets · Default: last 5 periods with project activity.</p>
           </div>
-          <div class="widget"><h3 class="font-medium mb-2">Opened vs Resolved (biweekly)""" + _tip("Compares issues Opened vs Resolved in each 2-week bucket. When Opened persistently exceeds Resolved, the backlog grows (demand > capacity); the reverse means the team is burning down outstanding work.") + """</h3><div class="h-48"><canvas id="flowChart"></canvas></div></div>
           <!-- [P8] The duplicate flowChart widget (a second canvas with the
                same id) is removed — Chart.js initialized only the first one,
                the duplicate stayed empty. -->
@@ -405,22 +404,9 @@ def _render_html_shell(ctx):
       </section>
 
       <section id="m-scope" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">Scope & Predictability""" + _tip("How much the team delivers and how predictably: throughput and velocity, backlog readiness, scope-change churn, and aging work. Together these reveal whether delivery is stable or slipping.") + """</h2>
+        <h2 class="text-lg font-semibold mb-3">Scope & Predictability""" + _tip("How predictable the delivery pipeline is: scope-change churn and aging work. Together these reveal whether delivery is stable or slipping.") + """</h2>
         <div class="grid md:grid-cols-2 gap-4">
-          <div class="widget"><h3 class="font-medium mb-2">Throughput (completed per 2-week period)""" + _tip("Number of issues completed in each 2-week period (any issue type). Throughput is a raw capacity measure; velocity below is a filtered, more refined one.") + """</h3><div class="h-48"><canvas id="throughputChart"></canvas></div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Velocity (completed Story/Task/Bug per 2-week period)""" + _tip("Number of Story/Task/Bug issues completed per 2-week period. Velocity is the team's realized capacity and is the basis for forecasting how much can be committed in future iterations.") + """</h3><div class="h-48"><canvas id="velocityChart"></canvas></div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Average Velocity (2-week)""" + _tip("The mean of the per-period velocity values. A stable average supports commitment and forecasting; large swings indicate unpredictability.") + """</h3>
-            <div class="na-box">""" + (f"{avg_velocity2} /2wk" if avg_velocity2 is not None else "N/A") + """</div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Backlog Health — Ready for Development""" + _tip("Number of issues currently in the 'Ready for Development' state. A healthy backlog keeps enough groomed, ready-to-start work so the team never starves for input.") + """</h3>
-            <div class="na-box">""" + (f"{ready_count} items" if ready_count else "N/A") + """</div></div>
           <div class="widget"><h3 class="font-medium mb-2">Sprint Scope Stability""" + _tip("How stable committed sprint scope is (added vs removed items). High instability means the team commits to work that is later dropped or expanded mid-sprint — a predictability risk.") + """</h3><div class="na-box">N/A (no sprints)</div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Avg Scope Change Volume (changed issues)""" + _tip("Average number of changed Story/Task/Bug issues (at least one status transition) per period. Per sprint when sprints exist, otherwise per 2-week period. High churn indicates unstable requirements or poor upfront planning.") + """</h3>
-            <div class="na-box">""" + (
-              (f"{jm['avg_scope_change_sprint']} / sprint"
-               if jm.get('avg_scope_change_sprint') is not None else
-               f"{jm['avg_scope_change_2wk']} / 2wk"
-               if jm.get('avg_scope_change_2wk') is not None else "N/A")
-            ) + """</div></div>
           <div class="widget md:col-span-2"><h3 class="font-medium mb-2">Scope Change Volume by 2-week period (changed issues)""" + _tip("Per-period count of issues (Story/Task/Bug) that changed status AT LEAST ONCE — ANY transition (New→Open, Open→In Progress, In Progress→Resolved, ...). This is a BROAD 'churn' metric: it counts every issue that moved, including normal forward progress. Spikes show periods of heavy rework/scope drift; a flat low line reflects a stable pipeline. DIFFERENCE vs Requirements Rework Rate: Scope Change counts ALL status changes (any direction), while Rework Rate counts ONLY returns to requirements/refinement (New/Open/To Do/Backlog/Reopened/Analysis/Design/Ready for Dev) AFTER dev started. So Scope Change is always larger — it is a volume of movement, not a rate of rework.") + """</h3><div class="h-48"><canvas id="scopeChangeChart"></canvas></div></div>
           <div class="widget"><h3 class="font-medium mb-2">Top Areas / Components (work)""" + _tip("Where the work is concentrated: the top 12 components by issue count. Helps spot overloaded areas and understand the shape of the delivery portfolio.") + """</h3>
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Component</th><th>Issues</th></tr></thead><tbody>
@@ -434,21 +420,12 @@ def _render_html_shell(ctx):
       </section>
 
       <section id="m-quality" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">Quality & Technical Debt""" + _tip("The cost of quality: bug trends, defect aging, bug-fixing cycle time, production leakage, and security findings. High values here erode velocity and inflate future maintenance.") + """</h2>
+        <h2 class="text-lg font-semibold mb-3">Quality & Technical Debt""" + _tip("The cost of quality: bug trends, defect aging, production leakage, and security findings. High values here erode velocity and inflate future maintenance.") + """</h2>
         <div class="grid md:grid-cols-2 gap-4">
           <div class="widget"><h3 class="font-medium mb-2">Bug Growth (new vs resolved)""" + _tip("Compares new bugs opened vs bugs resolved over time (weekly). When new bugs outpace resolved, the defect backlog grows and quality is deteriorating.") + """</h3><div class="h-48"><canvas id="bugChart"></canvas></div></div>
           <div class="widget"><h3 class="font-medium mb-2">Open Bugs by Priority""" + _tip("Distribution of currently-open bugs across priority levels. A heavy high-priority slice means urgent defects are competing for capacity with planned work.") + """</h3><div class="h-48"><canvas id="bugPrioChart"></canvas></div></div>
           <div class="widget"><h3 class="font-medium mb-2">Average Defect Age by Priority""" + _tip("For open bugs of each priority, how old they are on average (days since created). Critical/High defects aging for a long time signal that serious issues are being neglected.") + """</h3>
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Priority</th><th>Count</th><th>Avg Age</th></tr></thead><tbody>""" + defect_age_rows + """</tbody></table></div>
-          <div class="widget"><h3 class="font-medium mb-2">Cycle Time (Bug)""" + _tip("Cycle time for Bug/Sub-Bug = first 'Done/Closed' minus first 'In Progress' (from the issue changelog). Measures the active bug-fixing duration; lead time (created → done) is shown below and includes queue wait.") + """</h3>
-            <div class="na-box">""" + (
-              f"{jm['avg_bug_cycle']:.1f} days avg cycle ({jm['bug_cycle_count']} bugs)"
-              if jm.get('avg_bug_cycle') is not None else "N/A"
-            ) + """</div>
-            <p class="text-xs text-gray-500 mt-2">Lead time (created → done): <strong>""" + (
-              f"{jm['avg_bug_lead']:.1f} days" if jm.get('avg_bug_lead') is not None else "N/A"
-            ) + """</strong></p>
-          </div>
           <div class="widget"><h3 class="font-medium mb-2">Production Leakage Rate""" + _tip("Bugs tagged 'Prod' indicate defects found in production (leaked past QA). The leakage rate = prod bugs ÷ total bugs × 100. A high rate means defects are escaping testing and reaching end users.") + """</h3>
             <div class="na-box">""" + (
               f"{jm['defect_leakage_rate']:.1f}% leaked ({jm['prod_bugs']}/{jm['total_bugs']} prod bugs)"
@@ -459,7 +436,6 @@ def _render_html_shell(ctx):
               f"{jm.get('sast_issues', 0)} SAST/CWE findings · {jm.get('sec_type_issues', 0)} security issues ({jm.get('sec_open', 0)} open)"
               if jm.get('sast_issues') else "N/A (no SAST/security data)"
             ) + """</div></div>
-          <div class="widget"><h3 class="font-medium mb-2">Bug Fixing Time Allocation""" + _tip("Share of team time spent on fixing bugs vs building new features (from time-tracking fields). Not available when the project does not log work time.") + """</h3><div class="na-box">N/A (no time-tracking)</div></div>
           <div class="widget"><h3 class="font-medium mb-2">Quality Debts (open defects by priority)""" + _tip("Number of open defects at each priority level. This is the live quality debt the team must pay down — high-priority open defects should be addressed first.") + """</h3>
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Priority</th><th>Open</th></tr></thead><tbody>
             """ + "".join(f"<tr><td>{esc(p)}</td><td>{v}</td></tr>" for p, v in jm["open_bug_by_prio"].items()) + """</tbody></table></div>

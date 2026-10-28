@@ -36,25 +36,9 @@ document.querySelectorAll('.sidebar-link').forEach(a=>{
 // renders into the same #cfdChart canvas from the RC_RAW status timelines
 // during the widget boot chain (see chart_render.py).
 
-// Opened vs Resolved (biweekly)
-new Chart(document.getElementById('flowChart'), { type:'bar', data:{
-  labels:""" + week2_labels + """,
-  datasets:[
-    {label:'Opened', data:""" + opened2 + """, backgroundColor:'#2563eb'},
-    {label:'Resolved', data:""" + resolved2 + """, backgroundColor:'#10b981'}
-  ]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}} });
-
-// Throughput (biweekly)
-new Chart(document.getElementById('throughputChart'), { type:'bar', data:{
-  labels:""" + week2_labels + """,
-  datasets:[{label:'Completed (2wk)', data:""" + resolved2 + """, backgroundColor:'#10b981'}]
-  }, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}} });
-
-// Velocity (Story/Task/Bug completed per 2-week period)
-new Chart(document.getElementById('velocityChart'), { type:'bar', data:{
-  labels:""" + week2_labels + """,
-  datasets:[{label:'Velocity', data:""" + velocity2 + """, backgroundColor:'#8b5cf6'}]
-  }, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}} });
+// [P15] The static Opened vs Resolved / Throughput / Velocity widgets were
+// removed — the interactive Process Metrics - Trends widget (rcM-flow /
+// rcM-throughput / rcM-velocity) is the single source of truth for them.
 
 // Scope Change Volume (changed Story/Task/Bug per 2-week period)
 new Chart(document.getElementById('scopeChangeChart'), { type:'bar', data:{
