@@ -12,7 +12,6 @@ manifest of rules for external AI agents. Bilingual: English (EN) + Русски
 1. [Environment / Окружение](#1-environment--окружение)
 2. [Skill #1 — Synchronizer (Data Extraction)](#2-skill-1--synchronizer-data-extraction)
 3. [Skill #2 — Analyst (Dashboard Generation)](#3-skill-2--analyst-dashboard-generation)
-4. [Role Models / Ролевые модели](#4-role-models--ролевые-модели)
 
 ---
 
@@ -51,21 +50,21 @@ Example `.env`:
 
 ```
 # Jira
-JIRA_URL=https://jiraeu.epam.com
+JIRA_URL=https://jira.example.com
 JIRA_USERNAME=you@company.com
 JIRA_TOKEN=<token>
-JIRA_PROJECT=EPMRLCT
+JIRA_PROJECT=<PROJECT_KEY>
 
 # Confluence
-CONFLUENCE_URL=https://kb.epam.com
+CONFLUENCE_URL=https://confluence.example.com
 CONFLUENCE_USERNAME=you@company.com
 CONFLUENCE_TOKEN=<token>
-CONFLUENCE_PAGE_ID=2676801962
-CONFLUENCE_SPACE_KEY=EPMRLMEIMR   # optional: extract whole space
+CONFLUENCE_PAGE_ID=<page-id>
+CONFLUENCE_SPACE_KEY=<SPACE_KEY>   # optional: extract whole space
 
 # ChromaDB folder
-PROJECT_ALIAS=EMPRelocation        # optional: folder alias
-# DB_PATH=./vector_dbs/EPMRLCT    # optional: explicit folder
+PROJECT_ALIAS=<folder-alias>       # optional: folder alias
+# DB_PATH=./vector_dbs/<PROJECT_KEY>   # optional: explicit folder
 ```
 
 **Folder resolution priority (both tools):**
@@ -93,25 +92,25 @@ to other agents or the customer.
 ### 2.1 CLI Command Templates / Шаблоны CLI-команд
 
 ```bash
-# Jira — folder auto-named ./vector_dbs/EPMRLCT (by project key)
-python sync_agent.py --service jira --project-key EPMRLCT
+# Jira — folder auto-named ./vector_dbs/<PROJECT_KEY> (by project key)
+python sync_agent.py --service jira --project-key <PROJECT_KEY>
 
 # Same project under a customer-facing alias folder
-python sync_agent.py --service jira --project-key EPMRLCT --project-alias EMPRelocation
+python sync_agent.py --service jira --project-key <PROJECT_KEY> --project-alias <folder-alias>
 
 # Confluence — extract an ENTIRE space (all pages via CQL search)
-python sync_agent.py --service confluence --space-key EPMRLMEIMR
+python sync_agent.py --service confluence --space-key <SPACE_KEY>
 
 # Confluence — page tree under a root page
-python sync_agent.py --service confluence --page-id 2676801962
+python sync_agent.py --service confluence --page-id <page-id>
 
 # Confluence — page tree with deep-link crawling + image extraction
-python sync_agent.py --service confluence --page-id 2676801962 \
+python sync_agent.py --service confluence --page-id <page-id> \
   --follow-links --depth 2 --save-images
 
 # Jira reports — board reports (Control Chart, Epic Report, Velocity, CFD,
 # Scope Change, Forecast, Sprint) via the Agile/GreenHopper API
-python sync_agent.py --service jira-reports --project-key EPMRLCT
+python sync_agent.py --service jira-reports --project-key <PROJECT_KEY>
 
 # SYNC ALL (default) — pull every data source configured in .env:
 # Jira issues + related parameters, issue links, issue comments,
@@ -119,16 +118,16 @@ python sync_agent.py --service jira-reports --project-key EPMRLCT
 python sync_agent.py
 
 # Use credentials from .env only
-python sync_agent.py --service jira --project-key EPMRLCT
+python sync_agent.py --service jira --project-key <PROJECT_KEY>
 
 # Custom time window
-python sync_agent.py --service jira --project-key EPMRLCT --days 180
+python sync_agent.py --service jira --project-key <PROJECT_KEY> --days 180
 
 # Full custom JQL
-python sync_agent.py --service jira --jql 'project=EPMRLCT AND updated >= -90d'
+python sync_agent.py --service jira --jql 'project=<PROJECT_KEY> AND updated >= -90d'
 
 # Dry-run (print only, no DB writes)
-python sync_agent.py --service jira --project-key EPMRLCT --dry-run
+python sync_agent.py --service jira --project-key <PROJECT_KEY> --dry-run
 
 # Show all options
 python sync_agent.py --help
@@ -206,11 +205,11 @@ folder.
 # Generate dashboard + OLAP cube for the project alias from .env
 python analyze_agent.py
 
-# Explicit alias (overrides .env) -> ./vector_dbs/EMPRelocation
-python analyze_agent.py --alias EMPRelocation
+# Explicit alias (overrides .env) -> ./vector_dbs/<folder-alias>
+python analyze_agent.py --alias <folder-alias>
 
 # Explicit ChromaDB folder
-python analyze_agent.py --db-path ./vector_dbs/EPMRLCT
+python analyze_agent.py --db-path ./vector_dbs/<PROJECT_KEY>
 
 # Only regenerate the dashboard (skip OLAP)
 python analyze_agent.py --skip-olap
@@ -246,8 +245,9 @@ python analyze_agent.py --help
 The generated dashboard is a fully interactive, standalone HTML file with three
 tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
 
-- **Tab 1 — Product Analytics (PO/BA):** Strategy, Architecture (with images),
-  Requirements, Found Artifacts (pure text extraction, source links mandatory).
+- **Tab 1 — Product Analytics (product view):** Strategy, Architecture (with
+  images), Requirements, Found Artifacts (pure text extraction, source links
+  mandatory).
 - **Tab 2 — Metrics & Delivery (PM):** the **Process Metrics — Trends** widget
   (20 Jira-derived metrics with per-metric settings, healthy reference lines,
   trend conclusions and Δ% — see below), CFD, Cycle/Lead Time (from changelog),
@@ -363,66 +363,13 @@ pivot cube (`Issue Type × Status → count`) saved to CSV. It additionally emit
 
 ---
 
-## 4. Role Models / Ролевые модели
-
-Instructions for external AI agents on how to interpret the generated dashboard
-in the roles of **Senior PO/BA** and **Senior PM**.
-
-### 4.1 Senior PO / BA (Product Owner / Business Analyst)
-
-Focus on **Tab 1 — Product Analytics** and the product-oriented parts of
-**Tab 3 (Jira Data Profile)**.
-
-**How to interpret:**
-1. **Strategy:** read the Executive Product Vision, Core Value Proposition,
-   Target Audience, Business Sponsors, and Strategic Goals. Always cite the
-   source document URL.
-2. **Architecture:** review the modules/integrations blueprint and any rendered
-   architecture/schema images (C4 diagrams). Understand the system boundaries
-   and dependencies.
-3. **Requirements:** use the Product Capabilities matrix to map business value
-   to actual capabilities. Trace each capability to its source.
-4. **Found Artifacts:** treat this as the authoritative inventory of valuable
-   data (metrics tools, success criteria, stakeholders, links, team contacts)
-   extracted directly from the source documents — **no AI inference or gap
-   assumptions**. Use source links to verify.
-5. **Jira Data Profile (Tab 3):** interpret the Issue Type × Status matrix,
-   field-fill trends, and state machines to understand how the team actually
-   works vs. how it is documented.
-
-**Deliverables:** a product narrative, gap analysis based ONLY on sourced
-facts, capability-to-value mapping, and stakeholder communication materials.
-
-### 4.2 Senior PM (Program / Delivery Manager)
-
-Focus on **Tab 2 — Metrics & Delivery** and the delivery-health widgets.
-
-**How to interpret:**
-1. **Delivery:** read the Cumulative Flow Diagram, Cycle Time, and Lead Time
-   (both from changelog). Cycle Time = active work duration; Lead Time = total
-   lifetime incl. queue wait. A large gap indicates queue/backlog bottlenecks.
-2. **Scope & Predictability:** interpret Throughput, Velocity, Average Velocity,
-   Backlog Health ("Ready for Development"), and Scope Change Volume (average
-   changed issues per 2-week/sprint). High scope change = unstable planning.
-3. **Quality & Tech Debt:** interpret Bug Growth, Defect Age by Priority,
-   Defect Containment/Leakage (prod-tagged bugs), Security Posture (SAST/CWE),
-   and Quality Debts. Rising leakage or stagnant defects = quality risk.
-4. **Project Jira Reports:** use Control Chart, Epic Report, Velocity, CFD,
-   Scope Change, Forecast, Sprint reports (where available via the API) to
-   validate the computed metrics.
-5. **SDLC Process Matrix:** use the Issue Type × Status heatmap and the
-   Value Stream Mapping Gaps (Stories Leakage into Sub-Bugs, Backlog
-   Stagnation, Isolated Security Loop) to spot process health risks.
-
-**Deliverables:** delivery health assessment, bottleneck identification,
-forecasting (velocity-based), and actionable PM recommendations grounded in the
-sourced metrics.
-
-### 4.3 General Rules / Общие правила
+## 4. General Rules / Общие правила
 
 - **Always cite sources:** attach the source `url` to every claim.
 - **Respect "N/A":** if a widget shows "N/A", do not fabricate numbers.
-- **Biweekly lens:** prefer 2-week periods for capacity/velocity narratives.
+- **Configurable lens:** the Trends widget supports Daily…Annual periods —
+  match the narrative to the selected granularity instead of assuming
+  2-week buckets.
 - **Actionable, not generic:** tie every recommendation to a specific metric
   and its source.
 

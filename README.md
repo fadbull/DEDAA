@@ -80,13 +80,11 @@ DEDAA/
 │       ├── settings_widget.py #     Widget settings panel
 │       ├── cfd_widget.py      #     Cumulative Flow Diagram widget
 │       └── shell.py           #     HTML shell, tabs, CSS
-└── vector_dbs/                # One folder PER project (ChromaDB + dashboard + cube)
-    └── EMPRelocation/         # Example project folder — ALL of its data lives here
-        ├── chroma.sqlite3     #   ChromaDB (product_jira, product_knowledge, ...)
-        ├── assets/            #   Confluence images
-        ├── <hnsw-folders>/    #   Vector index segments
-        ├── analytics_dashboard.html  #   Generated dashboard (Skill #2)
-        └── jira_data_cube.csv        #   Generated OLAP cube (Skill #2)
+└── vector_dbs/                # One folder PER project (git-ignored, never committed)
+    └── <project-folder>/      #   created per project key / alias — ALL of the
+        ├── chroma.sqlite3     #   project's data lives here (see § Per-project
+        ├── assets/            #   isolation below for the folder contents)
+        └── …
 ```
 
 > Both agents are **thin CLI entry points**; all logic lives in the `lib/`
@@ -123,19 +121,19 @@ Required packages:
 Copy `.env.example` to `.env` and fill in your credentials:
 
 ```
-JIRA_URL=https://jiraeu.epam.com
+JIRA_URL=https://jira.example.com
 JIRA_USERNAME=you@company.com
 JIRA_TOKEN=<token>
-JIRA_PROJECT=EPMRLCT
+JIRA_PROJECT=<PROJECT_KEY>
 
-CONFLUENCE_URL=https://kb.epam.com
+CONFLUENCE_URL=https://confluence.example.com
 CONFLUENCE_USERNAME=you@company.com
 CONFLUENCE_TOKEN=<token>
-CONFLUENCE_PAGE_ID=2676801962
-CONFLUENCE_SPACE_KEY=EPMRLMEIMR   # optional: extract whole space
+CONFLUENCE_PAGE_ID=<page-id>
+CONFLUENCE_SPACE_KEY=<SPACE_KEY>   # optional: extract whole space
 
-PROJECT_ALIAS=EMPRelocation        # optional: folder alias
-# DB_PATH=./vector_dbs/EPMRLCT    # optional: explicit folder
+PROJECT_ALIAS=<folder-alias>       # optional: folder alias
+# DB_PATH=./vector_dbs/<PROJECT_KEY>   # optional: explicit folder
 ```
 
 > **Security:** every `.env*` file is git-ignored. Never commit credentials.
@@ -157,28 +155,28 @@ pages — each into its own collection.
 # SYNC ALL (default) — pull every data source configured in .env
 python sync_agent.py
 
-# Jira — folder auto-named ./vector_dbs/EPMRLCT (by project key)
-python sync_agent.py --service jira --project-key EPMRLCT
+# Jira — folder auto-named ./vector_dbs/<PROJECT_KEY> (by project key)
+python sync_agent.py --service jira --project-key <PROJECT_KEY>
 
-# Same project under a customer-facing alias folder -> ./vector_dbs/EMPRelocation
-python sync_agent.py --service jira --project-key EPMRLCT --project-alias EMPRelocation
+# Same project under a customer-facing alias folder -> ./vector_dbs/<alias>
+python sync_agent.py --service jira --project-key <PROJECT_KEY> --project-alias <folder-alias>
 
 # Confluence — extract an ENTIRE space (all pages via CQL search)
-python sync_agent.py --service confluence --space-key EPMRLMEIMR
+python sync_agent.py --service confluence --space-key <SPACE_KEY>
 
 # Confluence — page tree under a root page
-python sync_agent.py --service confluence --page-id 2676801962
+python sync_agent.py --service confluence --page-id <page-id>
 
 # Jira board reports (control chart, epic report, ...) -> product_jira_reports
-python sync_agent.py --service jira-reports --project-key EPMRLCT
+python sync_agent.py --service jira-reports --project-key <PROJECT_KEY>
 
 # The `jira` service ALSO fetches the project's release/version metadata
 # (name, dates, released/archived/overdue) -> product_jira_versions
-python sync_agent.py --service jira --project-key EPMRLCT
+python sync_agent.py --service jira --project-key <PROJECT_KEY>
 
 # INCREMENTAL UPDATE — merge only changes since the last sync into the
 # existing DB (upsert by id), preserving all previously stored documents.
-python sync_agent.py --service jira --project-key EPMRLCT --update
+python sync_agent.py --service jira --project-key <PROJECT_KEY> --update
 
 # Show all options
 python sync_agent.py --help
@@ -238,14 +236,14 @@ See [`skills_manifest.md`](skills_manifest.md) for the full specification.
 
 ```bash
 # Generate dashboard + OLAP cube for the project alias from .env
-# -> ./vector_dbs/EMPRelocation/{analytics_dashboard.html, jira_data_cube.csv}
+# -> ./vector_dbs/<folder-alias>/{analytics_dashboard.html, jira_data_cube.csv}
 python analyze_agent.py
 
-# Explicit alias (overrides .env) -> ./vector_dbs/EMPRelocation
-python analyze_agent.py --alias EMPRelocation
+# Explicit alias (overrides .env) -> ./vector_dbs/<folder-alias>
+python analyze_agent.py --alias <folder-alias>
 
 # Explicit ChromaDB folder (outputs land inside it)
-python analyze_agent.py --db-path ./vector_dbs/EPMRLCT
+python analyze_agent.py --db-path ./vector_dbs/<PROJECT_KEY>
 
 # Only regenerate the dashboard (skip OLAP)
 python analyze_agent.py --skip-olap
@@ -272,14 +270,6 @@ python analyze_agent.py --help
 | `--skip-olap` | Skip OLAP analysis (dashboard only) | off |
 | `--skip-dashboard` | Skip dashboard generation (OLAP only) | off |
 | `--dry-run` | Print only, do not write | off |
-
----
-
-## Role Models / Ролевые модели
-
-How external AI agents should interpret the generated dashboard in the roles of
-**Senior PO/BA** and **Senior PM** is described in
-[`skills_manifest.md`](skills_manifest.md) (§ Role Models / Ролевые модели).
 
 ---
 
