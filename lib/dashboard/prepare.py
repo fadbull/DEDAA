@@ -175,29 +175,92 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
                 + quote(jql_full, safe="") + '">' + esc(label)
                 + ' → Jira</a>')
 
-    # [P17] Each link opens EXACTLY the issues the widget's metric counts.
+    # [P17b] Each link opens EXACTLY the issues the widget's metric counts —
+    # and every JQL is built from the PROJECT'S ACTUAL data so Jira never
+    # rejects it: issue-type names come from jm["by_type"] (exact spellings,
+    # quoted), SAST/CWE labels come from the labels actually present.
+    # `labels starts with` is INVALID JQL (labels only support = / in) — the
+    # CWE link enumerates the actual cwe-* labels instead.
+    def _actual_types():
+        return {str(t).strip() for t in (jm.get("by_type") or {}) if t}
+
+    def _bug_types():
+        """Exact names of the bug-ish types present in the project."""
+        want = {"bug", "sub-bug", "subbug", "defect", "sub defect",
+                "bug_sub-bug", "sub_bug"}
+        return sorted(t for t in _actual_types()
+                      if t.lower().replace("_", "-") in
+                      {"bug", "sub-bug", "defect"})
+
+    def _quoted(names):
+        return ", ".join('"' + str(n).replace('"', '') + '"' for n in names)
+
+    def _sec_types():
+        """Security-ish types actually present in the project."""
+        want = {"security issue", "vulnerability", "security"}
+        return sorted(t for t in _actual_types() if t.lower() in want)
+
+    def _sast_labels():
+        """SAST tool labels that actually occur in the data."""
+        tools = {"SAST": "sast", "Gitleaks": "gitleaks",
+                 "Checkmarx CxSAST": "checkmarx_cxsast", "Snyk SAST": "snyk"}
+        return sorted({tools.get(t, t).lower()
+                       for t in (jm.get("sast_by_tool") or {})} | {"cwe-"})
+
+    def _cwe_labels():
+        return sorted(str(k) for k in (jm.get("cwe_by_code") or {}))
+
+    def _jql_link(jql, label):
+        """Uniform '<label> → Jira' link; returns '' when the population
+        is empty (the widget renders N/A anyway) or Jira base is unknown."""
+        if not jql:
+            return ""
+        base = _jira_base()
+        if not base:
+            return ""
+        from urllib.parse import quote
+        pk = _proj_key()
+        jql_full = (f"project = {pk} AND " + jql) if pk else jql
+        return ('<a class="text-xs text-blue-600 hover:underline" '
+                'target="_blank" href="' + esc(base) + '/issues/?jql='
+                + quote(jql_full, safe="") + '">' + esc(label)
+                + ' → Jira</a>')
+
+    _bug_t = _bug_types()
+    _bug_in = ("issuetype in (" + ", ".join('"' + t + '"' for t in _bug_t)
+               + ")" if _bug_t else None)
+    _sec_t = sorted(t for t in _actual_types()
+                    if t.lower() in {"security issue", "vulnerability",
+                                     "security"})
+    _sast_l = sorted({l for l in _sast_labels()}) if jm.get("sast_by_tool") else []
+    _cwe_l = sorted(str(k) for k in (jm.get("cwe_by_code") or {}))
+
     jql_links = {
-        # open bugs (any priority, not resolved) — the open-bug population
+        # open defects: bug-ish types present in the project, unresolved
         "open_bugs": _jql_link(
-            "issuetype in (Bug, Sub-bug) AND resolution is EMPTY",
-            "Open defects"),
+            _bug_in + " AND resolution is EMPTY", "Open defects")
+        if _bug_in else "",
         # defect age: the same open-bug population feeds the age stats
         "defect_age": _jql_link(
-            "issuetype in (Bug, Sub-bug) AND resolution is EMPTY",
-            "Open defects (age source)"),
+            _bug_in + " AND resolution is EMPTY",
+            "Open defects (age source)") if _bug_in else "",
         # production leakage: exactly the prod-labelled (leaked) defects
         "leakage": _jql_link(
-            "labels = prod AND issuetype in (Bug, Sub-bug)",
-            "Leaked (prod-tagged) defects"),
-        # security posture: SAST-tool labels OR security-type issues
+            "labels = prod AND " + _bug_in, "Leaked (prod-tagged) defects")
+        if _bug_in else "",
+        # security posture: SAST labels actually present OR actual sec types
         "security": _jql_link(
-            'labels in (sast, gitleaks, checkmarx, checkmarx_cxsast, snyk) '
-            'OR issuetype in ("Security Issue", "Vulnerability", "Security")',
-            "SAST/security issues"),
-        # CWE findings: only the CWE-labelled findings feed the CWE widget
+            " OR ".join(filter(None, [
+                ("labels in (" + ", ".join(_sast_labels()) + ")")
+                if _sast_labels() else "",
+                ('issuetype in (' + ", ".join('"' + t + '"' for t in _sec_t)
+                 + ")") if _sec_t else ""])),
+            "SAST/security issues") if (_sast_labels() or _sec_t) else "",
+        # CWE findings: labels in (actual cwe-* labels) — never `starts with`
         "cwe": _jql_link(
-            'labels starts with "cwe-"',
-            "CWE findings"),
+            "labels in (" + ", ".join('"' + l + '"' for l in _cwe_l) + ")"
+            if _cwe_l else "",
+            "CWE findings") if _cwe_l else "",
     }
 
     # Product content
