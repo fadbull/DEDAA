@@ -130,7 +130,7 @@ DEFAULT_SETTINGS = {
             "end": {"kind": "status", "set": "devStart"},
             "aggregation": "avg", "value": "days",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.05,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Requirements Cycle Time (avg days)",
         },
         "cycletime": {  # Cycle Time (active phase)
@@ -141,7 +141,7 @@ DEFAULT_SETTINGS = {
             "end": {"kind": "status", "set": "done"},
             "aggregation": "avg", "value": "days",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.05,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Cycle Time (avg days)",
         },
         # [FIX-A3] Lead Time = Work Item Lead Time (created → done) for ANY
@@ -153,7 +153,7 @@ DEFAULT_SETTINGS = {
             "end": {"kind": "status", "set": "done", "fallback": "resolutiondate"},
             "aggregation": "avg", "value": "days",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.05,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Lead Time (avg days)",
         },
         "qa": {  # Time in QA
@@ -166,7 +166,7 @@ DEFAULT_SETTINGS = {
             "end": {"kind": "status", "set": "qaExit"},
             "aggregation": "avg", "value": "days",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.05,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Time in QA (avg days)",
         },
         # [FIX-A5] Bug Fixing Time Allocation = Σ(timespent on Bug/Sub-bug)
@@ -177,7 +177,7 @@ DEFAULT_SETTINGS = {
             "aggregation": "allocation",
             "requires": "timeSpent",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.05,
+            "trendDir": "down", "threshold": 2,
             "label": "Bug Fixing Time Allocation (%)",
         },
         # [FIX-A4] WIP = point-in-time SNAPSHOT at each period end:
@@ -191,7 +191,7 @@ DEFAULT_SETTINGS = {
             "end": {"kind": "status", "set": "done"},
             "aggregation": "wipSnapshot",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.1,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Work in Progress (WIP)",
         },
         "floweff": {  # Flow Efficiency — unique: two intervals
@@ -203,7 +203,7 @@ DEFAULT_SETTINGS = {
                       "end": {"kind": "status", "set": "done"}},
             "aggregation": "avg", "value": "eff",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "up", "threshold": 0.5, "avgUnit": "%",
+            "trendDir": "up", "threshold": 5, "avgUnit": "%",
             "label": "Flow Efficiency (%)",
         },
         # ---- Count & rate ------------------------------------------------
@@ -212,7 +212,7 @@ DEFAULT_SETTINGS = {
             "start": {"kind": "field", "field": "resolutiondate"},
             "aggregation": "count",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "up", "threshold": 0.1,
+            "trendDir": "up", "threshold": 0.5,
             "label": "Throughput (completed)",
         },
         "velocity": {
@@ -220,7 +220,7 @@ DEFAULT_SETTINGS = {
             "start": {"kind": "field", "field": "resolutiondate"},
             "aggregation": "count",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "up", "threshold": 0.1,
+            "trendDir": "up", "threshold": 0.5,
             # [P1-STATES] Velocity state: auto picks SP velocity when the
             # window carries story points, else issue counts.
             "velocityMode": "auto",
@@ -257,7 +257,7 @@ DEFAULT_SETTINGS = {
             "returnTo": {"kind": "status", "set": "refinement"},
             "aggregation": "rate",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.1,
+            "trendDir": "down", "threshold": 2,
             "label": "Requirements Rework Rate (%)",
         },
         # [FIX-A1] Defect Density — two-level formula:
@@ -292,7 +292,7 @@ DEFAULT_SETTINGS = {
             "bucketBy": "created",   # created | resolutiondate
             "aggregation": "rate",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.1,
+            "trendDir": "down", "threshold": 2,
             # [P3-1] Renamed: the metric shows leakage, not containment.
             "label": "Production Leakage Rate (%)",
         },
@@ -305,7 +305,7 @@ DEFAULT_SETTINGS = {
             },
             "aggregation": "flow",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "up", "threshold": 0.1,
+            "trendDir": "up", "threshold": 0.5,
             "label": "Opened vs Resolved",
         },
         "bugflow": {
@@ -316,7 +316,7 @@ DEFAULT_SETTINGS = {
             },
             "aggregation": "flow",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "up", "threshold": 0.1,
+            "trendDir": "up", "threshold": 0.5,
             "label": "Bug Growth (new vs resolved)",
         },
         "incident": {  # unique: prod label + severity map
@@ -334,7 +334,7 @@ DEFAULT_SETTINGS = {
             },
             "aggregation": "grouped",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.1,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Incident Frequency",
         },
         # ---- P4 new metrics ------------------------------------------------
@@ -348,7 +348,7 @@ DEFAULT_SETTINGS = {
             "bucketBy": "created",
             "aggregation": "rate", "rateMode": "labels",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.1,
+            "trendDir": "down", "threshold": 2,
             "label": "Defect Escape Rate (Review → QA) (%)",
         },
         # [P4-4] Design Review Turnaround: status-driven avg-days metric.
@@ -359,7 +359,7 @@ DEFAULT_SETTINGS = {
             "reviewDone": "",    # status name (single)
             "aggregation": "avg", "value": "days",
             "granularity": "sprint", "defaultN": 5,
-            "trendDir": "down", "threshold": 0.05,
+            "trendDir": "down", "threshold": 0.5,
             "label": "Design Review Turnaround (avg days)",
         },
         # ---- P2 new metrics -------------------------------------------------

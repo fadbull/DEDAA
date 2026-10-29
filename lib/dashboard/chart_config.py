@@ -5,11 +5,11 @@ var rcChart = null;
 var rcMetric = 'cycle';
 var RC_CFG = {
   cycle: {label:'Requirements Cycle Time (avg days)', color:'#2563eb', aggregation:'avg',
-    field:'days', y_axis:'Requirements Cycle Time (days)', threshold:0.05, y_min:null, y_max:null,
+    field:'days', y_axis:'Requirements Cycle Time (days)', threshold:0.5, y_min:null, y_max:null,
     types:['Story','Task'],
     axis_note:'Y-axis: Requirements Cycle Time (days) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   rework: {label:'Requirements Rework Rate (%)', color:'#7c3aed', aggregation:'rate',
-    field:'reworked', y_axis:'Requirements Rework Rate (%)', threshold:0.1, y_min:0, y_max:100,
+    field:'reworked', y_axis:'Requirements Rework Rate (%)', threshold:2, y_min:0, y_max:100,
     types:['Story','Task'],
     axis_note:'Y-axis: Requirements Rework Rate (%) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [FIX-A3] Lead Time: any Issue Type via the top filter (Defect+Sub-bug =
@@ -17,21 +17,21 @@ var RC_CFG = {
   // [P1-STATES] Renamed to 'Issue Lead Time' — the number is the Jira issue
   // lifecycle (Created → Done), NOT the DORA Lead Time for Changes.
   lead: {label:'Issue Lead Time (avg days)', color:'#0ea5e9', aggregation:'avg',
-    field:'days', y_axis:'Issue Lead Time (days)', threshold:0.05, y_min:null, y_max:null,
+    field:'days', y_axis:'Issue Lead Time (days)', threshold:0.5, y_min:null, y_max:null,
     types:['Story','Task','Defect','Sub-bug'],
     axis_note:'Y-axis: Lead Time (days) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   flow: {label:'Opened vs Resolved', color:'#2563eb', aggregation:'flow',
-    field:'series', y_axis:'Issues', threshold:0.1, y_min:0, y_max:null,
+    field:'series', y_axis:'Issues', threshold:0.5, y_min:0, y_max:null,
     types:['Story','Task'],
     axis_note:'Y-axis: Issues opened/resolved · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.'},
   throughput: {label:'Throughput (completed)', color:'#10b981', aggregation:'count',
-    field:null, y_axis:'Completed issues', threshold:0.1, y_min:0, y_max:null,
+    field:null, y_axis:'Completed issues', threshold:0.5, y_min:0, y_max:null,
     types:['Story','Task','Defect'], trend_dir:'up',
     axis_note:'Y-axis: Completed issues · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.'},
   // [P1-STATES] Explicit unit naming: issue counts by default, SP state
   // available via the metric settings (velocityMode).
   velocity: {label:'Issue Velocity (completed items per period)', color:'#8b5cf6', aggregation:'count',
-    field:null, y_axis:'Completed items per period (issue count)', threshold:0.1, y_min:0, y_max:null,
+    field:null, y_axis:'Completed items per period (issue count)', threshold:0.5, y_min:0, y_max:null,
     types:['Story','Task','Defect'], trend_dir:'up',
     // [P9-P2-1] The UI type label is Defect (rcTypeLabel normalises Bug).
     axis_note:'Y-axis: Completed Story/Task/Defect · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.'},
@@ -40,7 +40,7 @@ var RC_CFG = {
   // filter can narrow to Defect+Sub-bug (Bug Cycle Time) or Story+Task
   // (Story/Task Cycle Time) without touching metric settings.
   cycletime: {label:'Cycle Time (avg days)', color:'#f59e0b', aggregation:'avg',
-    field:'days', y_axis:'Cycle Time (days)', threshold:0.05, y_min:null, y_max:null,
+    field:'days', y_axis:'Cycle Time (days)', threshold:0.5, y_min:null, y_max:null,
     types:['Story','Task','Defect','Sub-bug'],
     axis_note:'Y-axis: Cycle Time (days) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P11-A] Backlog Health: band metric — the trend verdict is the
@@ -52,30 +52,30 @@ var RC_CFG = {
   // [P4-4] Design Review Turnaround: avg days design-start → review-done.
   // N/A until two DIFFERENT statuses are configured (P1 N/A-state pattern).
   designreview: {label:'Design Review Turnaround (avg days)', color:'#0d9488', aggregation:'avg',
-    field:'days', y_axis:'Design review turnaround (days)', threshold:0.05, y_min:null, y_max:null,
+    field:'days', y_axis:'Design review turnaround (days)', threshold:0.5, y_min:null, y_max:null,
     types:['Story','Task'], avg_unit:' days',
     axis_note:'Y-axis: Design review turnaround (days) · X-axis: period (sprint / 2-week bucket). Works on the design start and review done statuses selected in the metric settings. Items with zero-day interval are excluded from the average. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P0v3-F4] The type list matches the runtime 'bug' alias (Defect+Sub-bug).
   // [P11-A] Bug Growth: the flow verdict reads the resolved-minus-opened
   // BALANCE slope (balance up = defect backlog shrinking = Improving).
   bugflow: {label:'Bug Growth (new vs resolved)', color:'#ef4444', aggregation:'flow',
-    field:'series', y_axis:'Bugs', threshold:0.1, y_min:0, y_max:null,
+    field:'series', y_axis:'Bugs', threshold:0.5, y_min:0, y_max:null,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: Bugs new/resolved · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'up'},
   // [FIX-A2] Leakage: escape-rate semantics (roles rate mode, qaSet denominator).
   // [P3-1] Renamed to «Production Leakage Rate» — containment is only a
   // one-line note in the tooltip (the metric shows leakage, not containment).
   leakage: {label:'Production Leakage Rate (%)', color:'#ec4899', aggregation:'rate',
-    rateMode:'roles', field:null, y_axis:'Production leakage rate (%)', threshold:0.1, y_min:0, y_max:100,
+    rateMode:'roles', field:null, y_axis:'Production leakage rate (%)', threshold:2, y_min:0, y_max:100,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: % of tested-or-prod bugs leaked to production · X-axis: period (sprint / 2-week bucket). The metric works on the production label from Widget settings. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [FIX-A5] Bug Fixing Time Allocation: worklog-based % (N/A without timeSpent).
   bugfix: {label:'Bug Fixing Time Allocation', color:'#f97316', aggregation:'allocation',
-    requires:'timeSpent', field:null, y_axis:'Allocation (%)', threshold:0.05, y_min:0, y_max:100,
+    requires:'timeSpent', field:null, y_axis:'Allocation (%)', threshold:2, y_min:0, y_max:100,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: % of logged work time spent on Bug/Sub-bug · X-axis: period (sprint / 2-week bucket). Requires Jira worklog. Healthy: < 20%. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   incident: {label:'Incident Frequency', color:'#f43f5e', aggregation:'grouped',
-    field:'severity', y_axis:'Prod bugs', threshold:0.1, y_min:0, y_max:null,
+    field:'severity', y_axis:'Prod bugs', threshold:0.5, y_min:0, y_max:null,
     groups:['Critical','Major','Minor'], colors:{Critical:'#dc2626',Major:'#f59e0b',Minor:'#10b981'},
     trend_dir:'down',
     // [P0-TYPES] Consistent bug-pool default (Defect+Sub-bug) — same pool
@@ -83,7 +83,7 @@ var RC_CFG = {
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: Production bugs (incidents) · X-axis: period (sprint / 2-week bucket). Stacked by severity (Critical/Major/Minor). Default shows the last 5 periods with project activity.'},
   qa: {label:'Time in QA (avg days)', color:'#06b6d4', aggregation:'avg',
-    field:'days', y_axis:'Time in QA (days)', threshold:0.05, y_min:null, y_max:null,
+    field:'days', y_axis:'Time in QA (days)', threshold:0.5, y_min:null, y_max:null,
     // [P5-TP] "work": defects pass QA too — the top filter can narrow.
     types:['Story','Task','Defect','Sub-bug'],
     // [P0v3-F2] The end anchor is the QA-exit set (QA passed), not Done.
@@ -96,21 +96,21 @@ var RC_CFG = {
     axis_note:'Y-axis: #defects found in QA ÷ SP of completed Story/Task (or #defects ÷ #(Story+Task) when story points are not available) per period · X-axis: period (sprint / 2-week bucket). High density signals messy logic / rushed coding / high cyclomatic complexity. Default shows the last 5 periods with project activity.'},
   // [FIX-A4] WIP: point-in-time snapshot at each bucket end (NOT inflow).
   wip: {label:'Work in Progress (WIP)', color:'#f59e0b', aggregation:'wipSnapshot',
-    field:null, y_axis:'WIP items (snapshot)', threshold:0.1, y_min:0, y_max:null,
+    field:null, y_axis:'WIP items (snapshot)', threshold:0.5, y_min:0, y_max:null,
     types:['Story','Task','Defect','Sub-bug'],
     // [P1-STATES] Explicit snapshot-granularity note.
     // [P11-B] The chart shows the TEAM TOTAL; the per-developer target needs
     // the team size (state it explicitly — the Person dimension may be off).
     axis_note:'Y-axis: WIP items (snapshot, team total) · X-axis: period (sprint / 2-week bucket). Snapshot at the end of each period; for the customary daily WIP snapshot set Periods = Daily. High WIP → high context switching → slower flow. Target: ≤ 1.5 WIP items per developer — the chart shows the team total, divide it by the team size for the per-developer view. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   floweff: {label:'Flow Efficiency (%)', color:'#10b981', aggregation:'avg',
-    field:'eff', y_axis:'Flow Efficiency (%)', threshold:0.5, y_min:0, y_max:100,
+    field:'eff', y_axis:'Flow Efficiency (%)', threshold:5, y_min:0, y_max:100,
     // [P5-TP] "work": active/total applies to every work type.
     types:['Story','Task','Defect','Sub-bug'], trend_dir:'up', avg_unit:'%',
     axis_note:'Y-axis: Active work time ÷ total elapsed × 100% · X-axis: period (sprint / 2-week bucket). Active = In Progress → Done; total = Created → Done. Default shows the last 5 periods with project activity.'},
   // [P4-3] Defect Escape Rate (Review → QA): label-driven rate metric
   // (two configurable labels; N/A until two DIFFERENT labels are set).
   escapereview: {label:'Defect Escape Rate (Review → QA) (%)', color:'#e11d48', aggregation:'rate',
-    rateMode:'roles', field:null, y_axis:'Defect escape rate (review → QA) (%)', threshold:0.1, y_min:0, y_max:100,
+    rateMode:'roles', field:null, y_axis:'Defect escape rate (review → QA) (%)', threshold:2, y_min:0, y_max:100,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: % of review-found defects that escaped review into QA · X-axis: period (sprint / 2-week bucket). Works on the review/QA labels selected in the metric settings. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P2v3-1] Clarification Cycle Count: returns to refinement BEFORE dev start.
@@ -706,7 +706,9 @@ function rcTipFor(mk){
     // denominator uses the Velocity metric's configured type list (distinct
     // settings — not one shared set). The auto rule needs story points on
     // BOTH sides; zero bars do not feed the average.
-    base += ' Numerator: ready items of the SELECTED issue types; denominator: team speed over the type list configured for the Velocity metric (a distinct setting — not the Backlog Health type selection).';
+    // [P19-D1] The denominator uses the FIXED Issue Velocity type set
+    // (BH_DEN_TYPES), not the Velocity metric's editable type list.
+    base += ' Numerator: ready items of the SELECTED issue types; denominator: team speed over the fixed Issue Velocity type set [Story, Task, Defect] (a distinct set — not the Backlog Health type selection).';
     base += ' Auto rule: Story-Point coverage requires story points on BOTH sides (ready items and completed velocity items); sprint availability applies. Buckets with no ready backlog or no completed work render as zero bars on the chart but do not enter the average.';
     if(st.forced && !st.computable){
       base += ' NOTE: the forced Velocity SP state cannot be computed on the current data (no story points in the window) — the metric shows N/A instead of silently falling back to issue counts.';
