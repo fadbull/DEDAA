@@ -963,6 +963,67 @@ RENDER_JS = """function rcApply(){
     }
   }
   rcClearPending();
+  // [P23-NEW] The issues table must show ONLY the items in the DISPLAYED
+  // chart. usedKeys was collected during the aggregation pass — in the
+  // default state (from/to null) it holds the metric's whole history while
+  // `periods` is narrowed to the last N buckets. Rebuild usedKeys from the
+  // finalized periods with per-family rules:
+  //   WIP snapshot: [enterDev, leaveDev) overlaps ≥1 displayed bucket end.
+  //   Coverage: numerator = ready interval overlaps a bucket end (same
+  //     readyFromUnverified clamp as the first pass); denominator =
+  //     PM_DATA.velocity items (from/to + dim + FIXED Story/Task/Defect
+  //     gate) whose rcBucketKey is displayed.
+  //   All other metrics: rcBucketKey(dev_start) is among the displayed
+  //     buckets (same filters as the aggregation loop).
+  // The rebuild iterates items (they carry .key) — never covReady (no .key).
+  (function(){
+    var periodSet={};
+    periods.forEach(function(p){ periodSet[p]=1; });
+    var peAll=periods.map(function(p){ return rcBucketEnd(p, gran); });
+    var rebuilt={};
+    if(isWipSnap){
+      wipItems.forEach(function(it){
+        var eD=it.enterDev;
+        if(eD===null||eD===undefined) return;
+        for(var pi=0;pi<peAll.length;pi++){
+          var E=peAll[pi];
+          if(eD<=E && (it.leaveDev===null||it.leaveDev===undefined||it.leaveDev>E)){ usedKeys[it.key]=1; return; }
+        }
+      });
+    } else if(isCoverage){
+      items.forEach(function(it){
+        if(!rcDimMatch(it, dim, sel)) return;
+        if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
+        var rf=(it.readyFrom!==undefined&&it.readyFrom!==null)?it.readyFrom:(new Date(it.dev_start)).getTime();
+        var rl=(it.readyLeft===null||it.readyLeft===undefined)?null:it.readyLeft;
+        if(it.readyFromUnverified && from && rf<from.getTime()) rf=from.getTime();
+        for(var pi=0;pi<peAll.length;pi++){
+          var E=peAll[pi];
+          if(rf<=E && (rl===null||rl>E)){ usedKeys[it.key]=1; return; }
+        }
+      });
+      var BH_DEN2={Story:1,Task:1,Defect:1};
+      (PM_DATA.velocity||[]).forEach(function(v){
+        var t=new Date(v.dev_start);
+        if(isNaN(t)) return;
+        if(from&&t<from) return;
+        if(to&&t>to) return;
+        if(!rcDimMatch(v, dim, sel)) return;
+        if(!BH_DEN_TYPES[rcTypeLabel(v.type)]) return;
+        if(periodSet[rcBucketKey(t, gran)]) usedKeys[v.key]=1;
+      });
+    } else {
+      items.forEach(function(it){
+        if(!rcDimMatch(it, dim, sel)) return;
+        if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
+        var t=new Date(it.dev_start);
+        if(isNaN(t)) return;
+        if(from&&t<from) return;
+        if(to&&t>to) return;
+        if(periodSet[rcBucketKey(t, gran)]) usedKeys[it.key]=1;
+      });
+    }
+  })();
   // Issues table: unique issues that participated in this calculation.
   RC_TABLE.rows=Object.keys(usedKeys);
   RC_TABLE.page=0;
