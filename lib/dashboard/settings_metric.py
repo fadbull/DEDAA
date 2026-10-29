@@ -201,7 +201,10 @@ function rcTrendRule(mk, S){
     return 'Trend: band rule — '+lo+'–'+hi+' sprints of ready work = Healthy (🟢), below '+lo+' = Under-stocked (🔴), above '+hi+' = Over-stocked (🟡).';
   }
   if(m.aggregation==='flow'){
-    return 'Trend: rising resolved−opened balance = Improving (🟢), falling = Degrading (🔴), |slope| ≤ '+thr+' = Stable (🟡).';
+    // [P19-B1] The bugflow series is new-vs-resolved — the balance word
+    // must match the series name ('new'), not 'opened'.
+    var openWord=(mk==='bugflow')?'new':'opened';
+    return 'Trend: rising resolved−'+openWord+' balance = Improving (🟢), falling = Degrading (🔴), |slope| ≤ '+thr+' = Stable (🟡).';
   }
   if(dir==='up'){
     return 'Trend: rising = Improving (🟢), falling = Degrading (🔴), |slope| ≤ '+thr+' = Stable (🟡).';
