@@ -415,8 +415,8 @@ def _render_html_shell(ctx):
           <div class="widget md:col-span-2"><h3 class="font-medium mb-2">Aging Issues (>30 days)""" + _tip("Issues that have stayed open for more than 30 days: key, summary, priority, current status, link and age in days (oldest first). Aging work is at risk of becoming stale, blocked, or forgotten — a candidate for escalation or de-scoping.") + """</h3>
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Issue</th><th>Summary</th><th>Priority</th><th>Status</th><th>Link</th><th>Age</th></tr></thead><tbody>""" + aging_rows + """</tbody></table></div>
         </div>
-        <div class="widget mt-4"><h3 class="font-medium mb-2">Ready for Development — Items""" + _tip("The actual list of issues sitting in 'Ready for Development', with priority and a link to each. This is the groomed, startable queue the team should pull from next.") + """</h3>
-          <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Issue</th><th>Priority</th><th>Link</th></tr></thead><tbody>""" + ready_rows + """</tbody></table>
+        <div class="widget mt-4 md:col-span-2"><h3 class="font-medium mb-2">Ready for Development — Items""" + _tip("The actual list of issues sitting in 'Ready for Development': key, summary, priority and a link to each. This is the groomed, startable queue the team should pull from next.") + """</h3>
+          <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Issue</th><th>Summary</th><th>Priority</th><th>Link</th></tr></thead><tbody>""" + ready_rows + """</tbody></table>
         </div>
       </section>
 

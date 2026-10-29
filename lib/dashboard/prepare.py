@@ -118,11 +118,15 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
 
     # Backlog health
     ready_count = len(jm["backlog_ready"])
+    # [P18] Ready items: Issue | Summary | Priority | Link — the tuple is
+    # (key, summary, prio, url); the old render shifted the fields (the
+    # 'Priority' column actually showed the summary and the link was built
+    # from the priority string). Mirrors the Aging Issues table format.
     ready_rows = "".join(
-        f"<tr><td>{esc(k)}</td><td>{esc(s)}</td>"
+        f"<tr><td>{esc(k)}</td><td>{esc(sm)}</td><td>{esc(p)}</td>"
         f"<td><a href='{esc(u)}' target='_blank'>link</a></td></tr>"
-        for k, s, p, u in jm["backlog_ready"][:15]
-    ) or "<tr><td colspan='3'>None</td></tr>"
+        for k, sm, p, u in jm["backlog_ready"][:15]
+    ) or "<tr><td colspan='4'>None</td></tr>"
 
     # [P17] Aging rows: Issue | Summary | Priority | Status | Link | Age.
     # The aging tuple is (age, key, summary, status, prio, url) — the old
