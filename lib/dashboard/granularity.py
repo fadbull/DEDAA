@@ -23,7 +23,7 @@ var RC_DEFAULT_N = 5;
 var rcCalTouchedMem={};
 function rcCalTouchedCur(){ return !!rcCalTouchedMem[rcMetric]; }
 function rcCalTouchedSet(){ rcCalTouchedMem[rcMetric]=true; }
-function rcCalTouchedMemReset(){ rcCalTouchedMem={}; }
+function rcCalTouchedMemReset(){ rcCalTouchedMem={}; rcCalTouched=false; }
 var rcCalTouched = false;
 
 function rcPad2(v){ return String(v).padStart(2,'0'); }
