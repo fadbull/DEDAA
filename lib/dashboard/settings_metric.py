@@ -294,8 +294,10 @@ function rcSettingsRender(){
     h+='<div class="mb-2"><span class="text-xs text-gray-600 mr-1">Ready status (Story/Task)</span>'
       +rcSelCtl('rcSet_backlog_readyStatus', V.statuses, rcReadyStatusDisp())+'</div>';
     if(!readyUsed){
+      // [P19-B3] The canonical reason string (single source with
+      // rcMetricState('backlog').reason) — no quotes, no /defect.
       h+='<div class="mb-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">'
-        +'No "Ready for development" status is present in the Jira history. Assign the status that marks a story/task/defect as ready to start in Widget settings → Workflow statuses → "Ready statuses (set: ready)".</div>';
+        +'No ready status present in the project history. Assign the status that marks a story/task as ready to start in Widget settings → Workflow statuses → Ready statuses (set: ready).</div>';
     }
     h+='<div class="mb-2"><span class="text-xs text-gray-600 mr-1">Defects</span>'
       +rcSelCtl('rcSet_backlog_defects', ['exclude','auto','include'], m.defects||'exclude')

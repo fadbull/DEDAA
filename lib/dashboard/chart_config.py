@@ -452,7 +452,22 @@ function rcMetricState(mk){
             label: state==='sp_weighted' ? 'per story point' : 'per item'};
   }
   if(mk==='backlog'){
+    // [P19-B3] If the project history contains no ready status at all, the
+    // metric cannot be computed — return the standard N/A state with the
+    // canonical reason. rcReadyStatusUsed() scans RC_RAW; it is the single
+    // source of truth used by the settings panel's amber warning too.
+    if(!rcReadyStatusUsed()){
+      return { state:'na', forced:false, computable:false, label:'N/A',
+               reason:'No ready status present in the project history. '+
+                      'Assign the status that marks a story/task as ready to start in '+
+                      'Widget settings → Workflow statuses → Ready statuses (set: ready).' };
+    }
     // [P10-P0-2] The snapshot carries the ACTUAL coverage decision
+    // (covUseSP / covSPMissing) computed in rcApply from the FILTERED
+    // window — the state must agree with the chart. The parallel
+    // re-derivation below is the boot fallback only (first paint, before
+    // the first rcApply has committed a snapshot).
+    var den=m.denominator||'auto';
     // (covUseSP / covSPMissing) computed in rcApply from the FILTERED
     // window — the state must agree with the chart. The parallel
     // re-derivation below is the boot fallback only (first paint, before
@@ -728,8 +743,8 @@ function rcTipFor(mk){
   if(mk==='reviewcycle'){
     base = 'Review Cycle Count = the average number of times an item was returned from the review phase for changes before approval, measured per reviewed item that reached done during the period. Items approved on the first review contribute zero; items never reviewed are excluded. Lower is better — healthy is ≤ 2 re-reviews per item. The review status set is editable in widget settings; without at least one review status configured, the metric renders N/A.';
   }
-  // [P4-3]/[P4-4]/[P2v3-2] N/A-state reasons surface in the tooltip.
-  if((mk==='escapereview'||mk==='designreview'||mk==='reviewcycle') && st.reason){
+  // [P4-3]/[P4-4]/[P2v3-2]/[P19-B3] N/A-state reasons surface in the tooltip.
+  if((mk==='escapereview'||mk==='designreview'||mk==='reviewcycle'||mk==='backlog') && st.reason){
     base = st.reason;
   }
   // [P1v3-5] The bugfix body names the CONFIGURED numerator types (the same

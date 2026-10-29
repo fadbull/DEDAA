@@ -320,6 +320,8 @@ RENDER_JS = """function rcApply(){
   var drNA = rcMetric==='designreview' && !rcMetricState('designreview').computable;
   // [P2v3-2] Review Cycle Count: N/A until at least one review status exists.
   var rcNA = rcMetric==='reviewcycle' && !rcMetricState('reviewcycle').computable;
+  // [P19-B3] Backlog Health: N/A when no ready status exists in the history.
+  var bhNA = rcMetric==='backlog' && !rcMetricState('backlog').computable;
   // [P1-STATES] Velocity: forced SP state without story points → N/A.
   var vForcedNA = rcMetric==='velocity' && (function(){
     var vm=((rcDraft||RC_SETTINGS).metrics||{}).velocity||{};
@@ -769,7 +771,7 @@ RENDER_JS = """function rcApply(){
   // [P10-P0-2] Backlog Health forced-SP with a missing side joins the same
   // N/A pattern (the snapshot carries covSPMissing).
   } else if((cfg.requires==='timeSpent' && !(RC_WIN_STATE&&RC_WIN_STATE.hasTimespent)) || erNA || drNA
-            || ddForcedNA || vForcedNA
+            || ddForcedNA || vForcedNA || bhNA
             || (isCoverage && !!(RC_WIN_STATE&&RC_WIN_STATE.covSPMissing))){
     // [FIX-A5] Bug Fixing Time Allocation without worklog: render an empty
     // greyed-out chart (the metric stays in the list; the conclusion line
@@ -862,7 +864,7 @@ RENDER_JS = """function rcApply(){
   // typeSel={} every item is skipped, the series is all-null and a flat
   // 0-trend would produce a false «Stable» verdict.
   var noTypesSelected = typeSel && Object.keys(typeSel).length===0;
-  if((cfg.requires==='timeSpent' && !RC_WIN_STATE.hasTimespent) || erNA || drNA || rcNA
+  if((cfg.requires==='timeSpent' && !RC_WIN_STATE.hasTimespent) || erNA || drNA || rcNA || bhNA
      || ddForcedNA || vForcedNA
      || (isCoverage && !!(RC_WIN_STATE&&RC_WIN_STATE.covSPMissing))){
     // [FIX-A5] N/A: the project does not log work time.
@@ -874,12 +876,13 @@ RENDER_JS = """function rcApply(){
     var naReason = erNA ? rcMetricState('escapereview').reason
                  : drNA ? rcMetricState('designreview').reason
                  : rcNA ? rcMetricState('reviewcycle').reason
+                 : bhNA ? rcMetricState('backlog').reason
                  : ddForcedNA ? 'no story points in the current window (forced SP-weighted mode)'
                  : vForcedNA ? 'no story points in the current window (forced SP state)'
                  : (isCoverage && RC_WIN_STATE.covSPMissing)
                     ? ('the forced Story-Point coverage cannot be computed — the '+RC_WIN_STATE.covSPMissing+' side carries no story points in the window')
                  : null;
-    conclEl.textContent = (erNA||drNA||rcNA||ddForcedNA||vForcedNA
+    conclEl.textContent = (erNA||drNA||rcNA||bhNA||ddForcedNA||vForcedNA
       || (isCoverage && !!(RC_WIN_STATE&&RC_WIN_STATE.covSPMissing)))
       ? 'ⓘ N/A — '+(naReason||'not computable on the current data')
       : 'ⓘ N/A — the project does not log work time (timespent fill-rate < 20%).';
