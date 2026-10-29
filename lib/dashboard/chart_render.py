@@ -291,6 +291,12 @@ RENDER_JS = """function rcApply(){
     // the dim/type selection is the correct window-scoped source here.
     var hasSP=(PM_DATA.velocity||[]).some(function(v){
       if((v.sp||0)<=0) return false;
+      // [P22-T3] The snapshot must be window-scoped: SP outside the
+      // from/to calendar range must not flip the forced-SP N/A rule.
+      var tv=new Date(v.dev_start);
+      if(isNaN(tv)) return false;
+      if(from&&tv<from) return false;
+      if(to&&tv>to) return false;
       if(!rcDimMatch(v, dim, sel)) return false;
       if(typeSel && !typeSel[rcTypeLabel(v.type)]) return false;
       return true;
@@ -570,8 +576,12 @@ RENDER_JS = """function rcApply(){
       }
     } else if(isWipSnap){
       // [FIX-A4] Box = average snapshot WIP per period over the window.
-      var wipSum=0; wipVals.forEach(function(v){ wipSum+=v; });
-      avgText = periods.length ? 'Avg: '+rcFmtAvg(wipSum/periods.length,'')+'/period' : 'Avg: n/a';
+      // [P22-T6] per_developer mode produces null buckets when no assignees
+      // are present — nulls are NOT counted in the denominator.
+      var wipDef=wipVals.filter(function(v){ return v!==null && v!==undefined; });
+      avgText=wipDef.length
+        ? 'Avg: '+rcFmtAvg(wipDef.reduce(function(a,b){return a+b;},0)/wipDef.length,'')+'/period'
+        : 'Avg: n/a';
     } else if(cfg.rateMode==='spDensity'){
       // [FIX-A1] Defect Density box: weighted ratio over the window.
       // [P1-STATES] The unit label follows the ACTIVE state.
@@ -665,39 +675,10 @@ RENDER_JS = """function rcApply(){
   var datasets=[], trend=null;
   var balTrend=null;   // [P0-3] single source of truth: flow trend = balance
   // [P1-I13] Issue Type dimension: one series per selected type. The
-  // per-type aggregation is a second pass over the FILTERED items (the
-  // same population as agg); the avg box / conclusion / trend keep
-  // working on the AGGREGATE as for every other dimension. Reference
-  // lines are drawn ONCE; N/A fires when ALL selected types are empty.
-  var typeAgg={}, typeKeys=[];
-  if(dim==='issuetype'){
-    (sel?Object.keys(sel):[]).forEach(function(t){ typeKeys.push(t); });
-    typeKeys.forEach(function(tk){ typeAgg[tk]={}; });
-    items.forEach(function(it){
-      if(!rcDimMatch(it, dim, sel)) return;
-      if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
-      var t=rcTypeLabel(it.type);
-      if(typeKeys.indexOf(t)<0) return;
-      var t2=new Date(it.dev_start);
-      if(from&&t<from) return;
-      if(to&&t>to) return;
-      var key=rcBucketKey(t, gran);
-      var a=typeAgg[t]||(typeAgg[t]={});
-      if(!a[key]) a[key]=(cfg.aggregation==='avg')?[]:(cfg.rateMode||cfg.aggregation==='allocation'?{n:0,total:0}:0);
-      if(cfg.aggregation==='avg'){
-        a[key].push(rcMetric==='floweff' ? it : it[cfg.field]);
-      } else if(cfg.aggregation==='sum'){
-        a[key]+=(it[cfg.field]||0);
-      } else if(cfg.aggregation==='count'){
-        a[key]+=1;
-      } else {
-        // rate / roles / spDensity / allocation: n/total by role.
-        if(it.role==='numerator') a[key].n++;
-        if(it.role==='denominator') a[key].total++;
-        if(cfg.aggregation==='rate'){ a[key].total++; if(it[cfg.field]) a[key].n++; }
-      }
-    });
-  }
+  // [P22-T7] The issuetype dimension was removed (a split, not a filter —
+  // broken for role-based/flow/grouped/coverage/snapshot metrics). The
+  // per-type second pass and the per-type dataset arm are gone; every
+  // dimension renders through the single-series branch below.
   if(isFlow){
     // Guard both series lookups: a window may contain only one series (or
     // none after type/dimension filtering) — missing series render as 0.
@@ -783,26 +764,6 @@ RENDER_JS = """function rcApply(){
     datasets=[{type:'bar', label:cfg.label, data:periods.map(function(){return 0;}),
       backgroundColor:'rgba(148,163,184,0.25)', borderColor:'#94a3b8', borderWidth:1}];
   } else {
-    // [P1-I13] Issue Type dimension: one bar series per selected type
-    // (grouped bars, one color per type); the trend/conclusion/box stay on
-    // the AGGREGATE; reference lines are drawn ONCE after the series.
-    if(dim==='issuetype' && typeKeys.length){
-      var PALETTE=['#2563eb','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#64748b'];
-      typeKeys.forEach(function(t, ti){
-        var a=typeAgg[t]||{};
-        var vals=periods.map(function(p){ return rcAggValue(cfg, a[p]); });
-        datasets.push({type:'bar', label:t, data:vals,
-          backgroundColor:PALETTE[datasets.length%PALETTE.length]+'99',
-          borderColor:PALETTE[datasets.length], borderWidth:1});
-      });
-      var aggVals=periods.map(function(p){ return rcAggValue(cfg, agg[p]); });
-      // [P12-P4] No trend over an empty selection or an all-null series
-      // (a flat 0-trend produces a false «Stable» verdict).
-      var hasAnyAgg=aggVals.some(function(v){ return v!==null && v!==undefined; });
-      trend = (emptyTypes || noTypesSelected || !hasAnyAgg)
-        ? null
-        : rcLinearTrend(aggVals);
-    } else {
     var values=periods.map(function(p){ return rcAggValue(cfg, agg[p]); });
     // [P0-TYPES] Empty type selection in the metric settings -> no trend
     // line (a flat 0-trend over an empty selection is misleading). An empty
@@ -819,7 +780,6 @@ RENDER_JS = """function rcApply(){
     ];
     if(trend){ datasets.push({type:'line', label:'Trend', data:trend.line, borderColor:'#ef4444',
       borderDash:[6,4], fill:false, tension:0, pointRadius:0, borderWidth:2}); }
-    }
     // [P1-5] Healthy reference lines (NOT targets — static guidance levels).
     // Distinct style from the trend line: dash [2,3], width 1.5.
     // [P1-I13] Drawn ONCE per chart regardless of the number of type series.
@@ -914,7 +874,13 @@ RENDER_JS = """function rcApply(){
     } else {
       var lastV=covVals[lastIdx];
       var lastP=periods[lastIdx];
-      var covD=(function(){ var d=rcLastTwo(covVals); return d?rcDeltaPct(d.last,d.prev,1):''; })();
+      // [P22-T5] Δ% must compare MEASUREMENTS, not placeholders: filter to
+      // the computable control points before taking the last two.
+      var covD=(function(){
+        var compVals=covVals.filter(function(_, i){ return covComputable[i]; });
+        var d=rcLastTwo(compVals);
+        return d?rcDeltaPct(d.last,d.prev,1):'';
+      })();
       var perTxt=(lastIdx===periods.length-1)?'':' · judged on '+lastP;
       if(lastV>=tMin&&lastV<=tMax){
         conclEl.textContent='🟢 Healthy coverage ('+(Math.round(lastV*10)/10)+' sprints of ready work)'+(covD?' · '+covD:'')+perTxt;
@@ -1228,14 +1194,7 @@ function cfdPeriodsChanged(){
 function cfdDimField(dim){ return dim==='component' ? 'team' : dim; }
 function cfdDimValues(dim){
   var seen={}, out=[];
-  // [P1-I13] Issue Type dimension: unique normalized types of the CFD items.
-  if(dim==='issuetype'){
-    (PM_DATA.cfd||[]).forEach(function(it){
-      var v=rcTypeLabel(it.type);
-      if(v && !seen[v]){ seen[v]=1; out.push(v); }
-    });
-    return out.sort();
-  }
+  // [P22-T7] The issuetype dimension was removed (see rcDimValues).
   (PM_DATA.cfd||[]).forEach(function(it){
     if(dim==='team'){
       rcItemTeams(it).forEach(function(v){ if(!seen[v]){seen[v]=1;out.push(v);} });
@@ -1346,37 +1305,11 @@ function cfdApply(){
     done.push(c.done); ip.push(c.ip); backlog.push(c.backlog);
   });
   var datasets=[];
-  // [P1-I13] Issue Type dimension: each status band splits into per-type
-  // segments (legend shows the types; the sum of the per-type segments
-  // equals the unsplit band). The stacking order keeps the band grouping:
-  // all Backlog segments, then all In-Progress, then all Done.
-  if(dim==='issuetype'){
-    var CFD_TYPES=(function(){ var s={}; items.forEach(function(it){ var v=rcTypeLabel(it.type); if(v) s[v]=1; }); return Object.keys(s).sort(); })();
-    var CFD_COLORS=['#2563eb','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#64748b'];
-    [['backlog', bands.backlog, 'Backlog', 'rgba(37,99,235,0.35)', '#2563eb'],
-     ['ip',      bands.ip,      'In Progress', 'rgba(245,158,11,0.35)', '#f59e0b'],
-     ['done',    bands.done, 'Done', 'rgba(16,185,129,0.35)', '#10b981']].forEach(function(bd){
-      if(!bd[1]) return;
-      CFD_TYPES.forEach(function(t, ti){
-        var vals=keys.map(function(k){
-          var endP=rcBucketEnd(k, gran);
-          var c=0;
-          items.forEach(function(it){
-            if(rcTypeLabel(it.type)!==t) return;
-            if(cfdStatusAt(it.events, endP, bandSets)===bd[0]) c++;
-          });
-          return c;
-        });
-        var col=CFD_COLORS[CFD_TYPES.indexOf(t)%CFD_COLORS.length];
-        datasets.push({label:bd[2]+' · '+t, data:vals,
-          borderColor:bd[4], backgroundColor:bd[3], fill: (datasets.length===0?'origin':'-1')});
-      });
-    });
-  } else {
+  // [P22-T7] The issuetype split arm was removed — the three bands stack
+  // as before for every remaining dimension.
   if(bands.backlog) datasets.push({label:'Backlog', data:backlog, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.35)', fill:'origin'});
   if(bands.ip)      datasets.push({label:'In Progress', data:ip, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.35)', fill:'-1'});
   if(bands.done)    datasets.push({label:'Done', data:done, borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.35)', fill:'-1'});
-  }
   if(cfdChartRef){ cfdChartRef.destroy(); }
   cfdChartRef=new Chart(document.getElementById('cfdChart'), {
     type:'line',

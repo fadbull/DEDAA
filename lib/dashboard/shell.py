@@ -249,7 +249,6 @@ def _render_html_shell(ctx):
                   <option value="component">Component</option>
                   <option value="epic">Epic</option>
                   <option value="person">Person</option>
-                  <option value="issuetype">Issue Type</option>
                 </select>
               </label>
               <label class="flex items-center gap-1">Select (multi)
@@ -353,7 +352,6 @@ def _render_html_shell(ctx):
                       <option value="component">Component</option>
                       <option value="epic">Epic</option>
                       <option value="person">Person</option>
-                      <option value="issuetype">Issue Type</option>
                     </select>
                   </label>
                   <label class="flex items-center gap-1">Select (multi)

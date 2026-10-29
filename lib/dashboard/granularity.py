@@ -106,11 +106,13 @@ function rcBucketEnd(key, gran){
     return d.getTime()-1;
   }
   if(gran==='weekly'){
-    // ISO week key: YYYY-Wnn
-    var wk=parseInt(key.split('-W')[1],10);
-    var mon=rcIsoWeekMonday(new Date(Date.UTC(y,0,4)));
-    mon.setUTCDate(mon.getUTCDate()+(wk-1)*7+7);
-    return mon.getTime()-1;
+    // [P22-T1] The weekly key is a Monday DATE string (YYYY-MM-DD) — see
+    // rcBucketKey. The old code parsed it as an ISO-week key (YYYY-Wnn),
+    // producing NaN for every weekly bucket. Bucket end = Monday + 7 days
+    // minus 1 ms.
+    var wd=new Date(key+'T00:00:00');
+    wd.setDate(wd.getDate()+7);
+    return wd.getTime()-1;
   }
   if(gran==='sprint'){
     // sprint key: YYYY-Wnn-mm (two ISO weeks starting at week nn)
@@ -318,15 +320,10 @@ function rcDimField(dim){
 }
 function rcDimValues(dim){
   var seen={}, out=[];
-  // [P1-I13] Issue Type dimension: unique normalized types of the ACTIVE
-  // items (already narrowed by the calendar + the top type filter), sorted.
-  if(dim==='issuetype'){
-    rcActiveItems().forEach(function(it){
-      var v=rcTypeLabel(it.type);
-      if(v && !seen[v]){ seen[v]=1; out.push(v); }
-    });
-    return out.sort();
-  }
+  // [P22-T7] The issuetype dimension was removed (it is a split, not a
+  // filter, and is broken for role-based/flow/grouped/coverage/snapshot
+  // metrics). Issue types remain accessible via the top Issue Types
+  // multi-checkbox and the metric-settings type list.
   rcActiveItems().forEach(function(it){
     if(dim==='team'){
       rcItemTeams(it).forEach(function(v){
@@ -406,11 +403,6 @@ var rcPersonOtherSet={};
 // the item matches if ANY of its teams is selected.
 function rcDimMatch(it, dim, sel){
   if(!sel) return true;
-  // [P1-I13] Issue Type dimension: the item matches when its normalized
-  // type is among the selected values.
-  if(dim==='issuetype'){
-    return !!sel[rcTypeLabel(it.type)];
-  }
   if(dim==='team'){
     return rcItemTeams(it).some(function(v){ return sel[v]; });
   }
