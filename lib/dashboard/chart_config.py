@@ -546,12 +546,12 @@ function rcMetricState(mk){
             label:drState==='ok'?'ok':'N/A', reason:drReason};
   }
   if(mk==='velocity'){
-    // [P1-STATES] Auto resolves to issue counts (Issue Velocity) — the
-    // count formula is computable on any data; SP velocity is opt-in via
-    // the forced 'sp' state (N/A when the window carries no story points).
+    // [P1-STATES] [P22-T4] 'auto' resolves to the SP state when the window
+    // carries story points, else to issue counts; 'sp' is the forced state
+    // (N/A when the window carries no story points).
     var vm2=m.velocityMode||'auto';
     var hasSP=rcWindowHasSP();
-    var state = vm2==='sp' ? 'sp' : 'items';
+    var state = (vm2==='sp' || (vm2==='auto' && hasSP)) ? 'sp' : 'items';
     var forced = vm2==='sp';
     var computable = !(state==='sp' && !hasSP);
     return {state:state, forced:forced, computable:computable,
