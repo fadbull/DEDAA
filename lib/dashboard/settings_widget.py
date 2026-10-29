@@ -150,6 +150,10 @@ function rcWidgetSettingsRender(){
   // ---- Workflow statuses (global status sets, shared by all metrics) ----
   h+='<div class="text-xs font-semibold text-gray-500 uppercase mb-1">Workflow statuses (from project history)</div>'
     +'<div class="text-xs text-gray-400 mb-2">Shared between the metrics that reference them.</div>';
+  // [P23-F4] The ready status has a SINGLE editor: Metrics settings →
+  // Backlog Health (it is the only metric reading statusSets.ready). The
+  // multi-select here would silently overwrite the metric-level value.
+  h+='<div class="text-xs text-gray-400 mb-2">Ready status (set: ready) is configured in the Backlog Health metric settings.</div>';
   // [FIX-A0] qaSet added to the workflow status sets (Leakage denominator).
   RC_SET_NAMES.forEach(function(name){
     h+='<div class="mb-2"><div class="text-xs text-gray-500">'+rcEsc(RC_SET_TITLES[name]||name)+'</div>'
@@ -302,7 +306,11 @@ var RC_SET_TITLES={
 };   // [FIX-A0] qaSet added · [P0v3-F2] qaExit added · [P2v3-2] review added
 // Status sets shown in "Widget settings → Workflow statuses" (multi-select
 // from the actual project statuses). [FIX-A0] qaSet included.
-var RC_SET_NAMES=['devStart','done','qaEntry','qaSet','qaExit','ready','backlog','refinement','review'];
+// [P23-F4] 'ready' is NOT in this list: it has a single editor (Metrics
+// settings → Backlog Health) — the Widget-settings multi-select would
+// overwrite the metric-level value. RC_SET_TITLES.ready and the
+// statusSets.ready default remain (the value stays meaningful).
+var RC_SET_NAMES=['devStart','done','qaEntry','qaSet','qaExit','backlog','refinement','review'];
 // Is the project's ready status actually present in the Jira history?
 // (Backlog Health: 'Ready for development' is the default ready status;
 // when it is absent the settings ask the user to assign one.)

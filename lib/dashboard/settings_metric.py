@@ -288,16 +288,28 @@ function rcSettingsRender(){
     // Coverage-specific: ready status + defect mode + denominator + band.
     // 'Ready for development' is the DEFAULT ready status for Story/Task;
     // when the project history has NO ready status at all, ask the user to
-    // assign one (the 'ready' status set in Widget settings).
+    // assign one (here — this panel is the SINGLE editor of the ready set,
+    // [P23-F4]).
     // [P2-I15] The top-level V (rcVocab) is reused — no duplicate V2 copy.
     var readyUsed=rcReadyStatusUsed();
     h+='<div class="mb-2"><span class="text-xs text-gray-600 mr-1">Ready status (Story/Task)</span>'
       +rcSelCtl('rcSet_backlog_readyStatus', V.statuses, rcReadyStatusDisp())+'</div>';
+    // [P23-F4] This panel is the single source for the ready status.
+    h+='<div class="text-xs text-gray-400 mb-2">This is the single place where the ready status is edited (the set: ready used by Backlog Health).</div>';
+    // [P23-F4] Transparency: a persisted MULTI-value ready set will be
+    // collapsed to the chosen single value on save.
+    var curReady=((rcDraft||RC_SETTINGS).statusSets||{}).ready||[];
+    if(curReady.length>1){
+      h+='<div class="mb-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">'
+        +'Multiple ready statuses were previously configured; selecting a single value will replace them.</div>';
+    }
     if(!readyUsed){
       // [P19-B3] The canonical reason string (single source with
       // rcMetricState('backlog').reason) — no quotes, no /defect.
+      // [P23-F4] The editor is THIS panel now (Widget settings no longer
+      // renders the ready set).
       h+='<div class="mb-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">'
-        +'No ready status present in the project history. Assign the status that marks a story/task as ready to start in Widget settings → Workflow statuses → Ready statuses (set: ready).</div>';
+        +'No ready status present in the project history. Assign the status that marks a story/task as ready to start in the Ready status selector above (set: ready).</div>';
     }
     h+='<div class="mb-2"><span class="text-xs text-gray-600 mr-1">Defects</span>'
       +rcSelCtl('rcSet_backlog_defects', ['exclude','auto','include'], m.defects||'exclude')

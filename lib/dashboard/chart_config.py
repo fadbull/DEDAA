@@ -153,13 +153,20 @@ var RC_TIP = {
   // [P3-LK] The denominator = QA-entered ∪ prod-labelled defects; the
   // opening follows the Defect Escape Rate template ('share of defects
   // that passed QA … and were found in production').
-  leakage: "Production Leakage Rate = the share of defects that passed QA (or were production-labelled) and were found in production. Computed as production-labelled defects ÷ (defects with a QA transition + production-labelled defects) × 100%, bucketed by creation date. Defects found before QA (code review, development, etc.) are excluded from both the numerator and the denominator. Lower is better — healthy is below 15%; high leakage means testing fails to contain defects. The complementary value (100% − leakage) is defect containment, not shown separately. The box shows the weighted average = total leaked ÷ total (QA-entered + prod) over the window.",
+  // [P23-F5] The denominator is a UNION — an issue with both a QA transition
+  // and the prod label counts ONCE (the old "+" read as arithmetic addition).
+  leakage: "Production Leakage Rate = the share of defects that passed QA (or were production-labelled) and were found in production. Computed as production-labelled defects ÷ (defects with a QA transition OR the production label — union, no double count) × 100%, bucketed by creation date. Defects found before QA (code review, development, etc.) are excluded from both the numerator and the denominator. Lower is better — healthy is below 15%; high leakage means testing fails to contain defects. The complementary value (100% − leakage) is defect containment, not shown separately. The box shows the weighted average = total leaked ÷ total (QA-entered OR prod-labelled, union, no double count) over the window.",
   // [P4-4] Design Review Turnaround: status-driven time metric.
   designreview: "Design Review Turnaround = avg(review done − design start) — how long the review of a design document / architectural solution takes. Target ≤ 2 business days for standard decisions. Both transitions must exist in the issue history and review-done must be later; items with zero-day interval are excluded from the average. Configure the two statuses in the metric settings; without them (or with an empty window) the metric shows N/A. The box shows the weighted average over the window: total days ÷ number of items.",
   // [P1v3-5] The tooltip body is built DYNAMICALLY (rcTipFor) — the static
   // fallback below is kept only for surfaces that cannot call functions.
-  bugfix: "Bug Fixing Time Allocation = percentage of logged work time attributed to the numerator types relative to all completed work, per period. Requires Jira worklog. Healthy: < 20%. Not available when the project does not log work time (timespent fill-rate < 20%).",
-  incident: "Incident Frequency = number of production Defects (tagged 'Prod') per selected period, stacked by severity (Critical/Major/Minor derived from priority). A rising frequency — especially Critical — indicates production stability is degrading. The box shows the average total incidents per period over the window.",
+  // [P23-F7] The static RC_TIP.bugfix entry was DELETED: rcTipFor
+  // unconditionally overwrites base for bugfix with the dynamic text (the
+  // configured type list + state) — the static string never rendered.
+  // bugfix_na stays (used by the N/A branch).
+  // [P23-F8] No hardcoded 'Prod': the effective label is resolved at
+  // runtime (rcProdLabelEff) — projects using another label see the truth.
+  incident: "Incident Frequency = number of production Defects (tagged with the production label configured in Widget settings) per selected period, stacked by severity (Critical/Major/Minor derived from priority). A rising frequency — especially Critical — indicates production stability is degrading. The box shows the average total incidents per period over the window.",
   // [P0v3-F2] The end anchor is the QA-exit set (QA passed) — not Done.
   qa: "Time in QA = average time from first QA-entry status to the first QA-exit status (e.g. Ready for DEMO / Resolved / Closed by default — editable in widget settings) for Story/Task with a QA transition. Measures how long work sits in the testing phase; statuses after the QA exit do not count. Items with zero-day interval are excluded from the average. HEALTHY < 1 sprint (<14 days). The box shows the weighted average over the window: total days ÷ number of items.",
   // [FIX-A1] Defect Density: mode-dependent base tooltip (the active variant
@@ -317,7 +324,8 @@ var RC_TIP_BOX = {
   // [P12-P5] defectdensity is resolved DYNAMICALLY (rcTipBoxFor) — the Box
   // section must describe the ACTIVE density mode, not both at once.
   defectdensity: '',
-  leakage: 'Box (top-right): weighted average = total leaked ÷ total (QA-entered + prod) over the window.',   // [FIX-A2]
+  // [P23-F5] Union wording — an issue with both markers counts once.
+  leakage: 'Box (top-right): weighted average = total leaked ÷ total (QA-entered OR prod-labelled, union, no double count) over the window.',   // [FIX-A2]
   incident: 'Box (top-right): average total incidents per period over the window.',
   flow: 'Box (top-right): average per period for each series (Avg Opened / Avg Resolved) over the window.',
   bugflow: 'Box (top-right): average per period for each series (Avg New / Avg Resolved) over the window.',
@@ -459,8 +467,11 @@ function rcMetricState(mk){
     if(!rcReadyStatusUsed()){
       return { state:'na', forced:false, computable:false, label:'N/A',
                reason:'No ready status present in the project history. '+
+                      // [P23-F4] The single editor is the Backlog Health
+                      // metric settings (Widget settings no longer renders
+                      // the ready set).
                       'Assign the status that marks a story/task as ready to start in '+
-                      'Widget settings → Workflow statuses → Ready statuses (set: ready).' };
+                      'the Backlog Health metric settings (Ready status selector, set: ready).' };
     }
     // [P10-P0-2] The snapshot carries the ACTUAL coverage decision
     // (covUseSP / covSPMissing) computed in rcApply from the FILTERED
