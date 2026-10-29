@@ -799,7 +799,7 @@ RENDER_JS = """function rcApply(){
       var hasAnyAgg=aggVals.some(function(v){ return v!==null && v!==undefined; });
       trend = (emptyTypes || noTypesSelected || !hasAnyAgg)
         ? null
-        : rcLinearTrend(aggVals.map(function(v){ return v===null?0:v; }));
+        : rcLinearTrend(aggVals);
     } else {
     var values=periods.map(function(p){ return rcAggValue(cfg, agg[p]); });
     // [P0-TYPES] Empty type selection in the metric settings -> no trend
@@ -810,7 +810,7 @@ RENDER_JS = """function rcApply(){
     var hasAnyValue=values.some(function(v){ return v!==null && v!==undefined; });
     trend = (emptyTypes || noTypesSelected || !hasAnyValue)
       ? null
-      : rcLinearTrend(values.map(function(v){ return v===null?0:v; }));
+      : rcLinearTrend(values);
     datasets=[
       {type:'bar', label:cfg.label, data:values,
        backgroundColor:cfg.color+'99', borderColor:cfg.color, borderWidth:1}

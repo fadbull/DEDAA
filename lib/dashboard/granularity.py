@@ -245,12 +245,34 @@ function rcClearPending(){
   if(b){ b.classList.remove('ring-2','ring-blue-400'); }
 }
 function rcLinearTrend(points){
-  var n=points.length; if(n<2) return null;
+  // Rule 1 — collect only valid points for the fit.
+  var idx=[], valid=[];
+  for(var i=0;i<points.length;i++){
+    var v=points[i];
+    if(v!==null && v!==undefined && !isNaN(v)){ idx.push(i); valid.push(v); }
+  }
+  // Empty series — no trend.
+  if(valid.length<2) return null;
+  // OLS over the valid points, using their REAL x positions.
+  var n=valid.length;
   var sx=0,sy=0,sxy=0,sxx=0;
-  for(var i=0;i<n;i++){ var x=i,y=points[i]; sx+=x; sy+=y; sxy+=x*y; sxx+=x*x; }
-  var denom=n*sxx-sx*sx; if(!denom) return null;
+  for(var k=0;k<n;k++){
+    var x=idx[k], y=valid[k];
+    sx+=x; sy+=y; sxy+=x*y; sxx+=x*x;
+  }
+  var denom=n*sxx-sx*sx;
+  if(!denom) return null;
   var slope=(n*sxy-sx*sy)/denom;
-  return {slope:slope, line:points.map(function(_,i){ return Math.max(0, sy/n + slope*(i-(n-1)/2)); })};
+  var intercept=(sy - slope*sx)/n;
+  // Rules 2 & 3 — null outside [first,last]; fitted value inside.
+  var first=idx[0], last=idx[idx.length-1];
+  return {
+    slope: slope,
+    line: points.map(function(_,i){
+      if(i<first || i>last) return null;
+      return Math.max(0, intercept + slope*i);
+    })
+  };
 }
 // An item's team(s), resolved LIVE from the widget-level teamConfig (so a
 // source change in the settings takes effect immediately):
