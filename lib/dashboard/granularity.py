@@ -116,9 +116,12 @@ function rcBucketEnd(key, gran){
   }
   if(gran==='sprint'){
     // sprint key: YYYY-Wnn-mm (two ISO weeks starting at week nn)
+    // [P24-P2] Local time throughout (rcBucketKey / rcBucketStart bucket in
+    // LOCAL time) — the old Date.UTC + setUTCDate mix shifted the bucket end
+    // by the UTC offset for viewers outside UTC.
     var wk2=parseInt(key.split('-W')[1],10);
-    var mon2=rcIsoWeekMonday(new Date(Date.UTC(y,0,4)));
-    mon2.setUTCDate(mon2.getUTCDate()+(wk2-1)*7+14);
+    var mon2=rcIsoWeekMonday(new Date(y,0,4));
+    mon2.setDate(mon2.getDate()+(wk2-1)*7+14);
     return mon2.getTime()-1;
   }
   if(gran==='monthly'){ var m2=new Date(y, parseInt(key.slice(5),10), 1); return m2.getTime()-1; }
@@ -126,79 +129,87 @@ function rcBucketEnd(key, gran){
   if(gran==='annual'){ return new Date(y+1, 0, 1).getTime()-1; }
   return new Date(y, parseInt(key.slice(5),10), 1).getTime()-1;
 }
-// Default window (From/To dates) for a granularity, anchored at the last
-// active date of the current metric's items.
+// [P24-A] Project activity anchor — ONE anchor shared by every metric.
+// Activity = every Jira event of the project (created, resolution date,
+// status transitions) in RC_RAW, restricted to the current dimension
+// selection. The anchor is the LAST bucket of the selected granularity
+// whose activity reaches RC_ANCHOR_MIN_SHARE of the median activity of the
+// non-empty buckets — stray late events (a handful of closures months after
+// the project ended) do not move the window into empty periods.
+var RC_ANCHOR_MIN_SHARE = 0.1;
+var rcAnchorCache = {};
+function rcProjectAnchor(gran){
+  var dimEl=document.getElementById('rcDim');
+  var dim=dimEl?dimEl.value:'project';
+  var sel=(typeof rcSelected==='function')?rcSelected():null;
+  var ck=gran+'|'+dim+'|'+(sel?Object.keys(sel).sort().join(','):'*')
+        +'|'+((RC_SETTINGS.teamConfig||{}).source||'');
+  if(rcAnchorCache.hasOwnProperty(ck)) return rcAnchorCache[ck]?new Date(rcAnchorCache[ck]):null;
+  function collect(useSel){
+    var cnt={}, lastIn={};
+    (RC_RAW||[]).forEach(function(r){
+      if(useSel && sel && !rcDimMatch(r, dim, sel)) return;
+      var ds=[];
+      if(r.created) ds.push(new Date(r.created));
+      if(r.resolutiondate) ds.push(new Date(r.resolutiondate+'T00:00:00'));
+      (r.events||[]).forEach(function(e){ ds.push(new Date(e[0])); });
+      ds.forEach(function(d){
+        if(isNaN(d)) return;
+        var k=rcBucketKey(d, gran);
+        cnt[k]=(cnt[k]||0)+1;
+        if(!lastIn[k] || d>lastIn[k]) lastIn[k]=d;
+      });
+    });
+    return {cnt:cnt, lastIn:lastIn};
+  }
+  var A=collect(true);
+  if(!Object.keys(A.cnt).length) A=collect(false);
+  var keys=Object.keys(A.cnt).sort();
+  var res=null;
+  if(keys.length){
+    var vals=keys.map(function(k){ return A.cnt[k]; }).sort(function(a,b){ return a-b; });
+    var med=vals[Math.floor((vals.length-1)/2)];
+    var minAct=Math.max(1, Math.ceil(med*RC_ANCHOR_MIN_SHARE));
+    for(var i=keys.length-1;i>=0;i--){
+      if(A.cnt[keys[i]]>=minAct){ res=A.lastIn[keys[i]]; break; }
+    }
+    if(!res) res=A.lastIn[keys[keys.length-1]];
+  }
+  rcAnchorCache[ck]=res?res.getTime():null;
+  return res?new Date(res):null;
+}
+// Last-N bucket keys ending at the bucket containing lastD (contiguous).
+function rcLastBucketKeys(lastD, n, gran){
+  var keys=[], guard=0;
+  var cur=rcBucketStart(lastD, gran);
+  var step=(gran==='daily')?1:(gran==='weekly')?7:(gran==='sprint')?14
+          :(gran==='monthly')?1:(gran==='quarterly')?3:12;
+  while(keys.length<n && guard<2000){
+    keys.push(rcBucketKey(cur, gran));
+    if(gran==='daily'||gran==='weekly'||gran==='sprint') cur.setDate(cur.getDate()-step);
+    else if(gran==='annual') cur.setFullYear(cur.getFullYear()-step);
+    else cur.setMonth(cur.getMonth()-step);
+    guard++;
+  }
+  return keys.reverse();
+}
+// Default window (From/To dates) for a granularity: the last N CONTIGUOUS
+// periods ending at the project activity anchor (rcProjectAnchor) — the
+// SAME window for every metric (N = the metric's defaultN, else 5). Empty
+// periods inside the window stay on the axis (0 for count/flow/grouped/
+// snapshot metrics, a gap for averages and rates).
 function rcDefaultWindow(gran){
-  var last=null;
-  // [P1v3-1b] Backlog Health anchors on the READY side only: the latest
-  // readiness start (readyFrom) among the ready population. Fallbacks:
-  // latest creation among the metric's numerator types → latest creation
-  // among all Jira items. The completion history is a denominator, not a
-  // time reference for the axis.
-  if(rcMetric==='backlog'){
-    (PM_DATA.backlog||[]).forEach(function(it){
-      var t=(it.readyFrom!==undefined&&it.readyFrom!==null)?new Date(it.readyFrom):new Date(it.dev_start);
+  var last=rcProjectAnchor(gran);
+  if(!last){
+    rcActiveItems().forEach(function(it){
+      var t=new Date(it.dev_start);
       if(!isNaN(t) && (!last || t>last)) last=t;
     });
-    if(!last){
-      rcActiveItems().forEach(function(it){
-        var t=new Date(it.dev_start);
-        if(!isNaN(t) && (!last || t>last)) last=t;
-      });
-    }
-    if(!last){
-      (RC_RAW||[]).forEach(function(r){
-        var t=r.created?new Date(r.created):null;
-        if(!isNaN(t) && (!last || t>last)) last=t;
-      });
-    }
-    if(!last || isNaN(last)) return null;
-    last.setHours(0,0,0,0);
-    var mEff0=((rcDraft||RC_SETTINGS).metrics||{})[rcMetric]||{};
-    var N0=(mEff0.defaultN!==undefined&&mEff0.defaultN!==null)?mEff0.defaultN:5;
-    var cur0=rcBucketStart(last, gran);
-    var step0 = (gran==='daily')?1:(gran==='weekly')?7:(gran==='sprint')?14
-              :(gran==='monthly')?1:(gran==='quarterly')?3:12;
-    var from0=new Date(cur0);
-    for(var i0=0;i0<N0-1;i0++){
-      if(gran==='daily'||gran==='weekly'||gran==='sprint') from0.setDate(from0.getDate()-step0);
-      else if(gran==='annual') from0.setFullYear(from0.getFullYear()-step0);
-      else from0.setMonth(from0.getMonth()-step0);
-    }
-    var next0=new Date(cur0);
-    if(gran==='daily'||gran==='weekly'||gran==='sprint') next0.setDate(next0.getDate()+step0);
-    else if(gran==='annual') next0.setFullYear(next0.getFullYear()+step0);
-    else next0.setMonth(next0.getMonth()+step0);
-    var to0=new Date(next0); to0.setDate(to0.getDate()-1); to0.setHours(23,59,59,999);
-    return {from:from0, to:to0};
   }
-  // Anchor at the last active date of items that pass the metric's DEFAULT
-  // type filter AND the currently applied Issue Type selection (so e.g.
-  // "Opened vs Resolved" + Defect/Sub-bug filter anchors on the same data as
-  // Bug Growth, keeping the two metrics comparable).
-  // [P5-TP] The default window anchors on the metric's RUNTIME type pool
-  // (rcTypesFor — aliases resolved), not the static display config.
-  var defTypes=rcTypesFor(rcMetric);
-  var typeSel=rcTypeSelected();
-  var dim=document.getElementById('rcDim').value;
-  var sel=rcSelected();
-  rcActiveItems().forEach(function(it){
-    if(defTypes.length && defTypes.indexOf(rcTypeLabel(it.type))<0) return;
-    if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
-    if(!rcDimMatch(it, dim, sel)) return;
-    var t=new Date(it.dev_start);
-    if(!isNaN(t) && (!last || t>last)) last=t;
-  });
   if(!last || isNaN(last)) return null;
-  last.setHours(0,0,0,0);
-  // [P1-2] EVERY granularity defaults to the last N periods INCLUDING the
-  // active one (N = the metric's saved defaultN, else 5). Previously only
-  // sprint returned a 5-bucket window — daily/weekly/monthly/quarterly/
-  // annual collapsed to the single active period, killing the trend view.
+  last=new Date(last); last.setHours(0,0,0,0);
   var mEff=((rcDraft||RC_SETTINGS).metrics||{})[rcMetric]||{};
-  var N=(mEff.defaultN!==undefined&&mEff.defaultN!==null)?mEff.defaultN:5;
-  // Walk back to the bucket start of the OLDEST of the last N periods
-  // (same step table as rcAxisRange).
+  var N=(mEff.defaultN!==undefined&&mEff.defaultN!==null)?mEff.defaultN:RC_DEFAULT_N;
   var cur=rcBucketStart(last, gran);
   var step = (gran==='daily')?1:(gran==='weekly')?7:(gran==='sprint')?14
             :(gran==='monthly')?1:(gran==='quarterly')?3:12;
@@ -208,7 +219,7 @@ function rcDefaultWindow(gran){
     else if(gran==='annual') from.setFullYear(from.getFullYear()-step);
     else from.setMonth(from.getMonth()-step);
   }
-  // To = the END of the active period (last ms of its last day).
+  // To = the END of the anchor period (last ms of its last day).
   var next=new Date(cur);
   if(gran==='daily'||gran==='weekly'||gran==='sprint') next.setDate(next.getDate()+step);
   else if(gran==='annual') next.setFullYear(next.getFullYear()+step);
@@ -246,7 +257,7 @@ function rcClearPending(){
   var b=document.getElementById('rcApplyBtn');
   if(b){ b.classList.remove('ring-2','ring-blue-400'); }
 }
-function rcLinearTrend(points){
+function rcLinearTrend(points, allowNeg){
   // Rule 1 — collect only valid points for the fit.
   var idx=[], valid=[];
   for(var i=0;i<points.length;i++){
@@ -272,9 +283,58 @@ function rcLinearTrend(points){
     slope: slope,
     line: points.map(function(_,i){
       if(i<first || i>last) return null;
-      return Math.max(0, intercept + slope*i);
+      // [P24-E] A signed series (flow balance) may legitimately go negative.
+      var y=intercept + slope*i;
+      return allowNeg ? y : Math.max(0, y);
     })
   };
+}
+// [P24-C] Trend verdict — ONE rule for every single-series metric.
+//   change% = OLS slope × (span of the periods with data) ÷ |mean| × 100
+//           = the relative change of the fitted trend across the window.
+//   |change%| ≤ stablePct          → 🟡 Stable
+//   otherwise the sign + the metric's trend direction → 🟢 Improving / 🔴 Degrading.
+// At least RC_TREND_MIN_POINTS periods with data are required; fewer →
+// no verdict ("not enough data"). An all-zero series is Stable.
+var RC_TREND_MIN_POINTS = 3;
+function rcStablePct(mk, S){
+  var m=(((S||rcDraft||RC_SETTINGS).metrics)||{})[mk]||{};
+  var v=m.stablePct;
+  if(v===undefined||v===null||isNaN(v)){ v=((RC_CFG[mk]||{}).stable_pct); }
+  return (v===undefined||v===null||isNaN(v))?10:Number(v);
+}
+function rcTrendVerdict(vals, dir, stablePct){
+  var pts=[];
+  (vals||[]).forEach(function(v,i){ if(v!==null&&v!==undefined&&!isNaN(v)) pts.push([i,v]); });
+  if(pts.length<RC_TREND_MIN_POINTS) return {ok:false, n:pts.length, reason:'few'};
+  var mean=pts.reduce(function(s,p){ return s+p[1]; },0)/pts.length;
+  var allZero=pts.every(function(p){ return p[1]===0; });
+  // A flat zero series (e.g. 0% rework in every period) is a measurement,
+  // not missing data: Stable.
+  if(allZero) return {ok:true, n:pts.length, change:0, cls:'stable', slope:0, zero:true};
+  var tr=rcLinearTrend(vals);
+  if(!tr) return {ok:false, n:pts.length, reason:'few'};
+  var span=pts[pts.length-1][0]-pts[0][0];
+  var base=Math.abs(mean);
+  var chg = base ? tr.slope*span/base*100 : 0;
+  var thr=(stablePct===undefined||stablePct===null)?10:stablePct;
+  var cls;
+  if(Math.abs(chg)<=thr) cls='stable';
+  else if(dir==='up') cls = chg>0 ? 'improving' : 'degrading';
+  else cls = chg<0 ? 'improving' : 'degrading';
+  return {ok:true, n:pts.length, change:chg, cls:cls, slope:tr.slope};
+}
+function rcVerdictWord(cls){
+  return cls==='improving' ? '🟢 Improving' : cls==='degrading' ? '🔴 Degrading' : '🟡 Stable';
+}
+// "Trend over window" fragment of the conclusion line.
+function rcTrendText(v, nPeriods){
+  if(!v || !v.ok){
+    return 'Not enough data for a trend ('+(v?v.n:0)+' of '+nPeriods+' periods with data; ≥ '+RC_TREND_MIN_POINTS+' needed)';
+  }
+  if(v.zero) return rcVerdictWord(v.cls)+' · 0 in all '+v.n+' periods with data';
+  var s=v.change>=0?'+':'−';
+  return rcVerdictWord(v.cls)+' · trend over '+v.n+' periods '+s+Math.abs(v.change).toFixed(0)+'% of the window mean';
 }
 // An item's team(s), resolved LIVE from the widget-level teamConfig (so a
 // source change in the settings takes effect immediately):
@@ -441,9 +501,14 @@ function rcAggValue(cfg, a){
   if(cfg.aggregation==='rate') return a.total ? (a.n/a.total*100) : null;
   if(cfg.aggregation==='sum')  return a;
   if(cfg.aggregation==='count') return a;
-  // avg — [P0-TYPES] Flow Efficiency items are objects ({eff, active,
-  // total}); map them to their eff value so the per-period mean keeps
-  // working for bars/trend/conclusion.
+  // avg — [P24-F] Flow Efficiency items are objects ({eff, active, total}):
+  // the period value is the SAME ratio as the box — Σ active ÷ Σ total ×
+  // 100 — so bars, trend and the window average share one formula.
+  if(a.length && a[0] && typeof a[0]==='object' && a[0].total!==undefined){
+    var fa=0, ft=0;
+    a.forEach(function(v){ if(v && v.total!==undefined && v.total!==null){ fa+=(v.active||0); ft+=v.total; } });
+    return ft>0 ? fa/ft*100 : null;
+  }
   var nums=a.map(function(v){ return (v&&typeof v==='object'&&v.eff!==undefined)?v.eff:v; });
   return nums.reduce(function(s,v){return s+v;},0)/nums.length;
 }

@@ -6,6 +6,7 @@ from .metric_settings import DEFAULT_SETTINGS, merge_settings
 
 
 import copy
+import re
 
 
 def _auto_seed_settings(S, raw_items):
@@ -93,6 +94,24 @@ def _auto_seed_settings(S, raw_items):
             er["autoSeeded"] = True
             metrics["escapereview"] = er
     return out
+
+
+def _label_has(labels, want):
+    """[P24-P2] Token label match (mirrors rcLabelHas in derive.py):
+    'prod' matches prod / PROD / prod_* / prod-* / production, NOT
+    product / non-prod / preprod."""
+    want = (want or "").strip().lower()
+    if not want:
+        return False
+    for tok in re.split(r"[,;\s]+", labels or ""):
+        v = tok.strip().lower()
+        if not v:
+            continue
+        if v == want or v.startswith(want + "_") or v.startswith(want + "-"):
+            return True
+        if want == "prod" and v == "production":
+            return True
+    return False
 
 
 def compute_jira(meta, docs, settings=None):
@@ -417,8 +436,10 @@ def compute_jira(meta, docs, settings=None):
             end = dnd or rd
             l_days = max(0, (end - cd).days)
             if l_days > 0:
+                # [P24-B] Bucketed by COMPLETION (end anchor) — completed-
+                # item time metrics are reported in the period they finish.
                 pm_lead_items.append(dict(dims, days=l_days,
-                                          dev_start=cd.isoformat()))
+                                          dev_start=end.isoformat()))
         # Opened vs Resolved (two series) - all types
         if cd:
             pm_flow_items.append(dict(dims, series="opened",
@@ -457,7 +478,7 @@ def compute_jira(meta, docs, settings=None):
         # and understated the leakage). Value = prod-labelled ÷
         # (QA-entered ∪ prod-labelled) × 100, bucketed by CREATED date (cd).
         if is_bug and cd:
-            leaked = 1 if _PROD_LABEL_EFF in labels.lower() else 0
+            leaked = 1 if _label_has(labels, _PROD_LABEL_EFF) else 0
             _lk_in_qa = False
             for _lk_dt, _lk_st in _status_events_from_text(d):
                 if (_lk_st or "").strip().lower() in QA_ST:
@@ -479,7 +500,7 @@ def compute_jira(meta, docs, settings=None):
         # per time period, by severity. Uses created date (when the incident was
         # opened/found). Severity is derived from priority: Critical/High ->
         # Critical, Major -> Major, Minor/Low/Trivial -> Minor.
-        if is_bug and cd and _PROD_LABEL_EFF in labels.lower():
+        if is_bug and cd and _label_has(labels, _PROD_LABEL_EFF):
             _pl = prio.lower()
             _sev_map_i = cfg_metric("incident").get("severityMap") or _SEV_MAP
             sev = "Minor"
@@ -564,7 +585,7 @@ def compute_jira(meta, docs, settings=None):
                 # [P2-2] Zero-day rule: floor(<24h)=0 → excluded.
                 if qa_days > 0:
                     pm_qa_items.append(dict(dims, days=qa_days,
-                                            dev_start=in_qa.isoformat()))
+                                            dev_start=done_ts.isoformat()))
         # 2) Defect density (rate) - defects found in QA / stories+tasks per
         #    period. [P0-B2] The numerator counts ONLY defects that have a
         #    transition into a QA status (found in QA) — prod-only defects
@@ -576,7 +597,7 @@ def compute_jira(meta, docs, settings=None):
                 # [P6-B5] Prod-labelled defects are excluded from the DD
                 # numerator — they belong to Production Leakage (the two
                 # populations must not overlap).
-                _dd_prod = _PROD_LABEL_EFF in labels.lower()
+                _dd_prod = _label_has(labels, _PROD_LABEL_EFF)
                 if _dd_in_qa and not _dd_prod:
                     pm_defect_density_items.append(dict(dims, density=1,
                                                         dev_start=cd.isoformat()))
@@ -613,7 +634,7 @@ def compute_jira(meta, docs, settings=None):
                 if total > 0:
                     pm_floweff_items.append(dict(dims,
                                                  eff=active / total * 100.0,
-                                                 dev_start=cd.isoformat()))
+                                                 dev_start=done_ts2.isoformat()))
 
         g = status_group(status)
         if g == "Backlog":

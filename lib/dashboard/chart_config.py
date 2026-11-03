@@ -5,11 +5,11 @@ var rcChart = null;
 var rcMetric = 'cycle';
 var RC_CFG = {
   cycle: {label:'Requirements Cycle Time (avg days)', color:'#2563eb', aggregation:'avg',
-    field:'days', y_axis:'Requirements Cycle Time (days)', threshold:0.5, y_min:null, y_max:null,
+    field:'days', y_axis:'Requirements Cycle Time (days)', stable_pct:10, y_min:null, y_max:null,
     types:['Story','Task'],
     axis_note:'Y-axis: Requirements Cycle Time (days) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   rework: {label:'Requirements Rework Rate (%)', color:'#7c3aed', aggregation:'rate',
-    field:'reworked', y_axis:'Requirements Rework Rate (%)', threshold:2, y_min:0, y_max:100,
+    field:'reworked', y_axis:'Requirements Rework Rate (%)', stable_pct:10, y_min:0, y_max:100,
     types:['Story','Task'],
     axis_note:'Y-axis: Requirements Rework Rate (%) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [FIX-A3] Lead Time: any Issue Type via the top filter (Defect+Sub-bug =
@@ -17,21 +17,21 @@ var RC_CFG = {
   // [P1-STATES] Renamed to 'Issue Lead Time' — the number is the Jira issue
   // lifecycle (Created → Done), NOT the DORA Lead Time for Changes.
   lead: {label:'Issue Lead Time (avg days)', color:'#0ea5e9', aggregation:'avg',
-    field:'days', y_axis:'Issue Lead Time (days)', threshold:0.5, y_min:null, y_max:null,
+    field:'days', y_axis:'Issue Lead Time (days)', stable_pct:10, y_min:null, y_max:null,
     types:['Story','Task','Defect','Sub-bug'],
     axis_note:'Y-axis: Lead Time (days) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   flow: {label:'Opened vs Resolved', color:'#2563eb', aggregation:'flow',
-    field:'series', y_axis:'Issues', threshold:0.5, y_min:0, y_max:null,
+    field:'series', y_axis:'Issues', stable_pct:10, y_min:0, y_max:null,
     types:['Story','Task'],
     axis_note:'Y-axis: Issues opened/resolved · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.'},
   throughput: {label:'Throughput (completed)', color:'#10b981', aggregation:'count',
-    field:null, y_axis:'Completed issues', threshold:0.5, y_min:0, y_max:null,
+    field:null, y_axis:'Completed issues', stable_pct:10, y_min:0, y_max:null,
     types:['Story','Task','Defect'], trend_dir:'up',
     axis_note:'Y-axis: Completed issues · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.'},
   // [P1-STATES] Explicit unit naming: issue counts by default, SP state
   // available via the metric settings (velocityMode).
   velocity: {label:'Issue Velocity (completed items per period)', color:'#8b5cf6', aggregation:'count',
-    field:null, y_axis:'Completed items per period (issue count)', threshold:0.5, y_min:0, y_max:null,
+    field:null, y_axis:'Completed items per period (issue count)', stable_pct:10, y_min:0, y_max:null,
     types:['Story','Task','Defect'], trend_dir:'up',
     // [P9-P2-1] The UI type label is Defect (rcTypeLabel normalises Bug).
     axis_note:'Y-axis: Completed Story/Task/Defect · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.'},
@@ -40,42 +40,42 @@ var RC_CFG = {
   // filter can narrow to Defect+Sub-bug (Bug Cycle Time) or Story+Task
   // (Story/Task Cycle Time) without touching metric settings.
   cycletime: {label:'Cycle Time (avg days)', color:'#f59e0b', aggregation:'avg',
-    field:'days', y_axis:'Cycle Time (days)', threshold:0.5, y_min:null, y_max:null,
+    field:'days', y_axis:'Cycle Time (days)', stable_pct:10, y_min:null, y_max:null,
     types:['Story','Task','Defect','Sub-bug'],
     axis_note:'Y-axis: Cycle Time (days) · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P11-A] Backlog Health: band metric — the trend verdict is the
   // under/over-stocked band judgement, not a directional slope.
   backlog: {label:'Backlog Health (sprints of ready work)', color:'#14b8a6', aggregation:'coverage',
-    field:null, y_axis:'Sprints of ready backlog', threshold:0.1, y_min:0, y_max:null,
+    field:null, y_axis:'Sprints of ready backlog', stable_pct:10, y_min:0, y_max:null,
     types:['Story','Task'], trend_dir:'down',
     axis_note:'Y-axis: sprints of ready backlog (ready items ÷ avg team speed per period) · X-axis: period (sprint / 2-week bucket). Healthy band: 2–3 sprints of coverage. Default shows the last 5 periods with project activity.'},
   // [P4-4] Design Review Turnaround: avg days design-start → review-done.
   // N/A until two DIFFERENT statuses are configured (P1 N/A-state pattern).
   designreview: {label:'Design Review Turnaround (avg days)', color:'#0d9488', aggregation:'avg',
-    field:'days', y_axis:'Design review turnaround (days)', threshold:0.5, y_min:null, y_max:null,
+    field:'days', y_axis:'Design review turnaround (days)', stable_pct:10, y_min:null, y_max:null,
     types:['Story','Task'], avg_unit:' days',
     axis_note:'Y-axis: Design review turnaround (days) · X-axis: period (sprint / 2-week bucket). Works on the design start and review done statuses selected in the metric settings. Items with zero-day interval are excluded from the average. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P0v3-F4] The type list matches the runtime 'bug' alias (Defect+Sub-bug).
   // [P11-A] Bug Growth: the flow verdict reads the resolved-minus-opened
   // BALANCE slope (balance up = defect backlog shrinking = Improving).
   bugflow: {label:'Bug Growth (new vs resolved)', color:'#ef4444', aggregation:'flow',
-    field:'series', y_axis:'Bugs', threshold:0.5, y_min:0, y_max:null,
+    field:'series', y_axis:'Bugs', stable_pct:10, y_min:0, y_max:null,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: Bugs new/resolved · X-axis: period (sprint / 2-week bucket). Default shows the last 5 periods with project activity.', trend_dir:'up'},
   // [FIX-A2] Leakage: escape-rate semantics (roles rate mode, qaSet denominator).
   // [P3-1] Renamed to «Production Leakage Rate» — containment is only a
   // one-line note in the tooltip (the metric shows leakage, not containment).
   leakage: {label:'Production Leakage Rate (%)', color:'#ec4899', aggregation:'rate',
-    rateMode:'roles', field:null, y_axis:'Production leakage rate (%)', threshold:2, y_min:0, y_max:100,
+    rateMode:'roles', field:null, y_axis:'Production leakage rate (%)', stable_pct:10, y_min:0, y_max:100,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: % of tested-or-prod bugs leaked to production · X-axis: period (sprint / 2-week bucket). The metric works on the production label from Widget settings. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [FIX-A5] Bug Fixing Time Allocation: worklog-based % (N/A without timeSpent).
   bugfix: {label:'Bug Fixing Time Allocation', color:'#f97316', aggregation:'allocation',
-    requires:'timeSpent', field:null, y_axis:'Allocation (%)', threshold:2, y_min:0, y_max:100,
+    requires:'timeSpent', field:null, y_axis:'Allocation (%)', stable_pct:10, y_min:0, y_max:100,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: % of logged work time spent on Bug/Sub-bug · X-axis: period (sprint / 2-week bucket). Requires Jira worklog. Healthy: < 20%. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   incident: {label:'Incident Frequency', color:'#f43f5e', aggregation:'grouped',
-    field:'severity', y_axis:'Prod bugs', threshold:0.5, y_min:0, y_max:null,
+    field:'severity', y_axis:'Prod bugs', stable_pct:10, y_min:0, y_max:null,
     groups:['Critical','Major','Minor'], colors:{Critical:'#dc2626',Major:'#f59e0b',Minor:'#10b981'},
     trend_dir:'down',
     // [P0-TYPES] Consistent bug-pool default (Defect+Sub-bug) — same pool
@@ -83,7 +83,7 @@ var RC_CFG = {
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: Production bugs (incidents) · X-axis: period (sprint / 2-week bucket). Stacked by severity (Critical/Major/Minor). Default shows the last 5 periods with project activity.'},
   qa: {label:'Time in QA (avg days)', color:'#06b6d4', aggregation:'avg',
-    field:'days', y_axis:'Time in QA (days)', threshold:0.5, y_min:null, y_max:null,
+    field:'days', y_axis:'Time in QA (days)', stable_pct:10, y_min:null, y_max:null,
     // [P5-TP] "work": defects pass QA too — the top filter can narrow.
     types:['Story','Task','Defect','Sub-bug'],
     // [P0v3-F2] The end anchor is the QA-exit set (QA passed), not Done.
@@ -91,36 +91,36 @@ var RC_CFG = {
   // [FIX-A1] Defect Density: per_sp / per_item two-level formula.
   // [P7-DD] The numerator is the COUNT of defects (per SP or per item).
   defectdensity: {label:'Defect Density', color:'#8b5cf6', aggregation:'rate',
-    rateMode:'spDensity', field:null, y_axis:'Defects per SP (or per item without SP)', threshold:0.1, y_min:0, y_max:null,
+    rateMode:'spDensity', field:null, y_axis:'Defects per SP (or per item without SP)', stable_pct:10, y_min:0, y_max:null,
     types:['Story','Task','Defect','Sub-bug'], trend_dir:'down',
     axis_note:'Y-axis: #defects found in QA ÷ SP of completed Story/Task (or #defects ÷ #(Story+Task) when story points are not available) per period · X-axis: period (sprint / 2-week bucket). High density signals messy logic / rushed coding / high cyclomatic complexity. Default shows the last 5 periods with project activity.'},
   // [FIX-A4] WIP: point-in-time snapshot at each bucket end (NOT inflow).
   wip: {label:'Work in Progress (WIP)', color:'#f59e0b', aggregation:'wipSnapshot',
-    field:null, y_axis:'WIP items (snapshot)', threshold:0.5, y_min:0, y_max:null,
+    field:null, y_axis:'WIP items (snapshot)', stable_pct:10, y_min:0, y_max:null,
     types:['Story','Task','Defect','Sub-bug'],
     // [P1-STATES] Explicit snapshot-granularity note.
     // [P11-B] The chart shows the TEAM TOTAL; the per-developer target needs
     // the team size (state it explicitly — the Person dimension may be off).
     axis_note:'Y-axis: WIP items (snapshot, team total) · X-axis: period (sprint / 2-week bucket). Snapshot at the end of each period; for the customary daily WIP snapshot set Periods = Daily. High WIP → high context switching → slower flow. Target: ≤ 1.5 WIP items per developer — the chart shows the team total, divide it by the team size for the per-developer view. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   floweff: {label:'Flow Efficiency (%)', color:'#10b981', aggregation:'avg',
-    field:'eff', y_axis:'Flow Efficiency (%)', threshold:5, y_min:0, y_max:100,
+    field:'eff', y_axis:'Flow Efficiency (%)', stable_pct:10, y_min:0, y_max:100,
     // [P5-TP] "work": active/total applies to every work type.
     types:['Story','Task','Defect','Sub-bug'], trend_dir:'up', avg_unit:'%',
     axis_note:'Y-axis: Active work time ÷ total elapsed × 100% · X-axis: period (sprint / 2-week bucket). Active = In Progress → Done; total = Created → Done. Default shows the last 5 periods with project activity.'},
   // [P4-3] Defect Escape Rate (Review → QA): label-driven rate metric
   // (two configurable labels; N/A until two DIFFERENT labels are set).
   escapereview: {label:'Defect Escape Rate (Review → QA) (%)', color:'#e11d48', aggregation:'rate',
-    rateMode:'roles', field:null, y_axis:'Defect escape rate (review → QA) (%)', threshold:2, y_min:0, y_max:100,
+    rateMode:'roles', field:null, y_axis:'Defect escape rate (review → QA) (%)', stable_pct:10, y_min:0, y_max:100,
     types:['Defect','Sub-bug'],
     axis_note:'Y-axis: % of review-found defects that escaped review into QA · X-axis: period (sprint / 2-week bucket). Works on the review/QA labels selected in the metric settings. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P2v3-1] Clarification Cycle Count: returns to refinement BEFORE dev start.
   clarcycle: {label:'Clarification Cycle Count (avg cycles)', color:'#8b5cf6', aggregation:'avg',
-    field:'cycles', y_axis:'Clarification cycles (count)', threshold:0.1, y_min:null, y_max:null,
+    field:'cycles', y_axis:'Clarification cycles (count)', stable_pct:10, y_min:null, y_max:null,
     types:['Story','Task'], avg_unit:' cycles',
     axis_note:'Y-axis: Clarification cycles (count) · X-axis: period (sprint / 2-week bucket). Counts returns to refinement BEFORE development starts; Requirements Rework Rate counts returns AFTER dev start. Default shows the last 5 periods with project activity.', trend_dir:'down'},
   // [P2v3-2] Review Cycle Count: re-review cycles per reviewed item reaching done.
   reviewcycle: {label:'Review Cycle Count (avg re-reviews)', color:'#14b8a6', aggregation:'avg',
-    field:'count', y_axis:'Re-review cycles (count)', threshold:0.1, y_min:null, y_max:null,
+    field:'count', y_axis:'Re-review cycles (count)', stable_pct:10, y_min:null, y_max:null,
     // [P5-TP] "work": PR review applies to every work type.
     types:['Story','Task','Defect','Sub-bug'], avg_unit:' re-reviews', trend_dir:'down',
     axis_note:'Y-axis: Re-review cycles (count) · X-axis: period (sprint / 2-week bucket). Works on the review statuses configured in widget settings. Default shows the last 5 periods with project activity.'}
@@ -137,18 +137,18 @@ var RC_TIP = {
   // [P2v3-1/2] The new count metrics build their tooltips dynamically
   // (rcTipFor) — no static entries needed here.
   // [P1v3-4] No external metric family: the comparison sentence is removed.
-  lead: "Issue Lead Time = average time from creation to the first done-style status (the set is editable in widget settings; Resolved is used when no done transition exists — the resolutiondate fallback) for any selected Issue Type. Items with zero-day interval are excluded (including the resolutiondate fallback). Includes queue and backlog wait. HEALTHY < 30 days. The box shows the weighted average over the window: total days ÷ number of items.",
+  lead: "Issue Lead Time = average time from creation to the first done-style status (the set is editable in widget settings; Resolved is used when no done transition exists — the resolutiondate fallback) for any selected Issue Type. Items with zero-day interval are excluded (including the resolutiondate fallback). Includes queue and backlog wait. HEALTHY < 30 days. The box shows the weighted average over the window: total days ÷ number of items. Each item is counted in the period it was COMPLETED (done date). A period without completed items has no bar (gap).",
   // [P9-P2-1] The UI type label is Defect (rcTypeLabel normalises Bug).
-  velocity: "Issue Velocity = number of completed Story/Task/Defect issues per period. Measures team throughput in issue counts, not story points. Higher is better: a rising trend is Improving, a falling trend is Degrading. The box shows the average completed per period over the window.",
+  velocity: "Velocity = completed Story/Task/Defect work per period (resolution date). Auto mode shows Story Point Velocity (sum of story points) when at least 50% of the completed items in the window carry story points, otherwise Issue Velocity (issue counts); the mode can be forced in the metric settings. Higher is better. A period with nothing completed counts as 0. The box shows the average per period over the window, in the same unit as the bars.",
   // [P12-P1] Granularity-neutral wording: the period follows the Periods
   // selector (daily … annual), not a hardcoded 2-week bucket.
-  flow: "Opened vs Resolved per selected period for requirements work (Story/Task by default — broaden via the Issue Type filter). If Opened persistently > Resolved the backlog grows (demand > capacity); the reverse means the team is burning down outstanding work. The box shows the average per period for each series (Avg Opened / Avg Resolved) over the window.",
-  throughput: "Throughput = number of issues completed per selected period (Story/Task/Defect by default — broaden via the Issue Type filter). A raw capacity measure; Velocity is a filtered, more refined version. Higher is better: a rising trend is Improving, a falling trend is Degrading. The box shows the average completed per period over the window.",
+  flow: "Opened vs Resolved per selected period for requirements work (Story/Task by default — broaden via the Issue Type filter). If Opened persistently > Resolved the backlog grows (demand > capacity); the reverse means the team is burning down outstanding work. The box shows the average per period for each series (Avg Opened / Avg Resolved) over the window. Opened = creation date, Resolved = resolution date; both series are always shown (0 when a period has none). The verdict combines the net balance over the window with the balance trend.",
+  throughput: "Throughput = number of issues completed per selected period (Story/Task/Defect by default — broaden via the Issue Type filter). A raw capacity measure; Velocity is a filtered, more refined version. Higher is better: a rising trend is Improving, a falling trend is Degrading. The box shows the average completed per period over the window. Items are counted in the period of their resolution date; a period with nothing completed counts as 0.",
   // [FIX-A6] Cycle Time works for any Issue Type via the top filter.
-  cycletime: "Cycle Time = avg(first done-style status − first dev-start status) for any selected Issue Type — pick Defect + Sub-bug to see Bug Cycle Time; pick Story + Task to see Story/Task Cycle Time. Measures only the active execution phase (excludes queue/backlog wait). Items with zero-day interval are excluded from the average. HEALTHY < 14 days. The box shows the weighted average over the window: total days ÷ number of items.",
+  cycletime: "Cycle Time = avg(first done-style status − first dev-start status) for any selected Issue Type — pick Defect + Sub-bug to see Bug Cycle Time; pick Story + Task to see Story/Task Cycle Time. Measures only the active execution phase (excludes queue/backlog wait). Items with zero-day interval are excluded from the average. HEALTHY < 14 days. The box shows the weighted average over the window: total days ÷ number of items. Each item is counted in the period it was COMPLETED (done date). A period without completed items has no bar (gap).",
   backlog: "Backlog Health = HOW MANY SPRINTS of ready work the backlog holds. Formula: ready items (Story+Task in 'Ready for development'; Defects excluded by default) at each period end ÷ team speed per period. Team speed = Average Velocity in story points per period ONLY when the project has sprints AND story points (numerator = story-point SUM of the ready items, SP ÷ SP); with story points but NO sprints the calculation uses issue counts (ready issues ÷ Average Throughput per period) to avoid mixing units; no story points — issues as well. The sprint availability behind the auto rule is set in Widget settings → Sprint data availability. Optimal range: 2–3 sprints of coverage — below 2 the team risks starving for startable work, above 3 the grooming effort is wasted. The box shows the AVG of the per-period values (control points): sum of Backlog Health at each period end ÷ number of control points in the window.",
   // [P2-1] State the default type set explicitly + the narrowing hint.
-  bugflow: "Bug Growth = new vs resolved Defects and Sub-bugs per selected period (both defect types are included by default; narrow the set via the Issue Type checkboxes). When new bugs outpace resolved the defect backlog grows and quality deteriorates. The box shows the average per period for each series (Avg New / Avg Resolved) over the window.",
+  bugflow: "Bug Growth = new vs resolved Defects and Sub-bugs per selected period (both defect types are included by default; narrow the set via the Issue Type checkboxes). When new bugs outpace resolved the defect backlog grows and quality deteriorates. The box shows the average per period for each series (Avg New / Avg Resolved) over the window. New = creation date, Resolved = resolution date; both series are always shown (0 when a period has none). The verdict combines the net balance over the window with the balance trend.",
   // [P0v3-F1] The tooltip describes the REAL formula: prod-labelled defects
   // [P3-LK] The denominator = QA-entered ∪ prod-labelled defects; the
   // opening follows the Defect Escape Rate template ('share of defects
@@ -157,7 +157,7 @@ var RC_TIP = {
   // and the prod label counts ONCE (the old "+" read as arithmetic addition).
   leakage: "Production Leakage Rate = the share of defects that passed QA (or were production-labelled) and were found in production. Computed as production-labelled defects ÷ (defects with a QA transition OR the production label — union, no double count) × 100%, bucketed by creation date. Defects found before QA (code review, development, etc.) are excluded from both the numerator and the denominator. Lower is better — healthy is below 15%; high leakage means testing fails to contain defects. The complementary value (100% − leakage) is defect containment, not shown separately. The box shows the weighted average = total leaked ÷ total (QA-entered OR prod-labelled, union, no double count) over the window.",
   // [P4-4] Design Review Turnaround: status-driven time metric.
-  designreview: "Design Review Turnaround = avg(review done − design start) — how long the review of a design document / architectural solution takes. Target ≤ 2 business days for standard decisions. Both transitions must exist in the issue history and review-done must be later; items with zero-day interval are excluded from the average. Configure the two statuses in the metric settings; without them (or with an empty window) the metric shows N/A. The box shows the weighted average over the window: total days ÷ number of items.",
+  designreview: "Design Review Turnaround = avg(review done − design start) — how long the review of a design document / architectural solution takes. Target ≤ 2 business days for standard decisions. Both transitions must exist in the issue history and review-done must be later; items with zero-day interval are excluded from the average. Configure the two statuses in the metric settings; without them (or with an empty window) the metric shows N/A. The box shows the weighted average over the window: total days ÷ number of items. Each item is counted in the period its review was completed.",
   // [P1v3-5] The tooltip body is built DYNAMICALLY (rcTipFor) — the static
   // fallback below is kept only for surfaces that cannot call functions.
   // [P23-F7] The static RC_TIP.bugfix entry was DELETED: rcTipFor
@@ -166,20 +166,20 @@ var RC_TIP = {
   // bugfix_na stays (used by the N/A branch).
   // [P23-F8] No hardcoded 'Prod': the effective label is resolved at
   // runtime (rcProdLabelEff) — projects using another label see the truth.
-  incident: "Incident Frequency = number of production Defects (tagged with the production label configured in Widget settings) per selected period, stacked by severity (Critical/Major/Minor derived from priority). A rising frequency — especially Critical — indicates production stability is degrading. The box shows the average total incidents per period over the window.",
+  incident: "Incident Frequency = number of production Defects (tagged with the production label configured in Widget settings) per selected period, stacked by severity (Critical/Major/Minor derived from priority). A rising frequency — especially Critical — indicates production stability is degrading. The box shows the average total incidents per period over the window. A period without production defects counts as 0.",
   // [P0v3-F2] The end anchor is the QA-exit set (QA passed) — not Done.
-  qa: "Time in QA = average time from first QA-entry status to the first QA-exit status (e.g. Ready for DEMO / Resolved / Closed by default — editable in widget settings) for Story/Task with a QA transition. Measures how long work sits in the testing phase; statuses after the QA exit do not count. Items with zero-day interval are excluded from the average. HEALTHY < 1 sprint (<14 days). The box shows the weighted average over the window: total days ÷ number of items.",
+  qa: "Time in QA = average time from first QA-entry status to the first QA-exit status (e.g. Ready for DEMO / Resolved / Closed by default — editable in widget settings) for Story/Task with a QA transition. Measures how long work sits in the testing phase; statuses after the QA exit do not count. Items with zero-day interval are excluded from the average. HEALTHY < 1 sprint (<14 days). The box shows the weighted average over the window: total days ÷ number of items. Each item is counted in the period it PASSED QA (QA-exit date). A period without such items has no bar (gap).",
   // [FIX-A1] Defect Density: mode-dependent base tooltip (the active variant
   // is picked in rcTipFor based on densityMode / SP fill-rate).
   // [P6-B5] The numerator counts QA-found defects only — prod-labelled ones
   // belong to Production Leakage (the two populations must not overlap).
   // [P7-DD] The numerator is the COUNT of defects in both modes.
-  defectdensity: "Defect Density (per story point) = Number of defects found in QA ÷ Story points of completed Story/Task per period. Defects carrying the production label are excluded here — they are counted in Production Leakage instead. High density = messy logic / rushed coding / high cyclomatic complexity. Lower is better.",
-  defectdensity_per_item: "Defect Density (per item) = Defects found in QA ÷ (Story + Task) per period. This is a count-based fallback used when story points are not available in the project (or the SP fill-rate is below 50%). The denominator uses issue counts. Defects carrying the production label are excluded here — they are counted in Production Leakage instead. Lower is better.",
+  defectdensity: "Defect Density (per story point) = Number of defects found in QA ÷ Story points of completed Story/Task per period. Defects carrying the production label are excluded here — they are counted in Production Leakage instead. High density = messy logic / rushed coding / high cyclomatic complexity. Lower is better. Defects are counted by creation date, story points by completion date; a period without completed work has no bar, and the box uses the same periods as the bars.",
+  defectdensity_per_item: "Defect Density (per item) = Defects found in QA ÷ (Story + Task) per period. This is a count-based fallback used when story points are not available in the project (or the SP fill-rate is below 50%). The denominator uses issue counts. Defects carrying the production label are excluded here — they are counted in Production Leakage instead. Lower is better. Defects are counted by creation date, completed items by completion date; a period without completed work has no bar, and the box uses the same periods as the bars.",
   // [FIX-A4] WIP: point-in-time snapshot (no 'inflow' wording).
   wip: "WIP = number of items in a dev status at each period end (point-in-time snapshot). Target ≤ 1.5 WIP items per developer — the chart shows the team total, divide it by the team size for the per-developer view. High WIP → high context switching → slower flow. Lower is better. The box shows the average snapshot WIP per period over the window. Granularity of the snapshot follows the Periods selector; a daily snapshot requires Periods = Daily.",
   bugfix_na: "Not available — the project does not log work time (timespent fill-rate < 20%).",
-  floweff: "Flow Efficiency = Active work time ÷ Total elapsed time × 100%. Active = In Progress → Done; Total = Created → Done. Items with a zero-day total interval are excluded from the average. Measures what fraction of lead time is actual work vs waiting. Higher is better (e.g. >50% is good, <25% is poor). The box shows the weighted average over the window: total active ÷ total elapsed.",
+  floweff: "Flow Efficiency = Σ Active work time ÷ Σ Total elapsed time × 100% of the items completed in the period (the bar and the box use the same ratio). Active = In Progress → Done; Total = Created → Done. Items with a zero-day total interval are excluded from the average. Measures what fraction of lead time is actual work vs waiting. Higher is better (e.g. >50% is good, <25% is poor). The box shows the weighted average over the window: total active ÷ total elapsed. Each item is counted in the period it was COMPLETED (done date). A period without completed items has no bar (gap).",
   // [P4-3] Defect Escape Rate (Review → QA): label-driven rate metric.
   escapereview: "Defect Escape Rate (Review → QA) = % of defects that passed code review but were found in QA — a high value means weak review. Formula: defects labeled [found in QA] ÷ (defects labeled [found in review] + defects labeled [found in QA]) × 100%, bucketed by Created date. Both labels are configured in the metric settings (offered from the project's bug labels); the default type set is Defect + Sub-bug. Without the configured labels (or with an empty window) the metric shows N/A. The box shows the weighted average = total escaped ÷ total (review + QA) over the window."
 };
@@ -562,7 +562,13 @@ function rcMetricState(mk){
     // (N/A when the window carries no story points).
     var vm2=m.velocityMode||'auto';
     var hasSP=rcWindowHasSP();
-    var state = (vm2==='sp' || (vm2==='auto' && hasSP)) ? 'sp' : 'items';
+    // [P24-D] auto → Story Point Velocity only when ≥ 50% of the window's
+    // completed items carry story points (a few estimated items must not
+    // turn the whole series into SP).
+    var spFill=(RC_WIN_STATE && RC_WIN_STATE.velSpFill!==undefined) ? RC_WIN_STATE.velSpFill
+      : (function(){ var a=PM_DATA.velocity||[]; if(!a.length) return 0;
+          return a.filter(function(v){ return (v.sp||0)>0; }).length/a.length; })();
+    var state = (vm2==='sp' || (vm2==='auto' && hasSP && spFill>=0.5)) ? 'sp' : 'items';
     var forced = vm2==='sp';
     var computable = !(state==='sp' && !hasSP);
     return {state:state, forced:forced, computable:computable,

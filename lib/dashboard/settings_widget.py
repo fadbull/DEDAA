@@ -68,6 +68,9 @@ function rcMergeSettings(base, user){
   return out;
 }
 function rcRebuildData(){
+  // [P24-A] The project activity anchor depends on the raw data and the
+  // settings (team source, person threshold) — recompute it on rebuild.
+  if(typeof rcAnchorCache!=='undefined'){ rcAnchorCache={}; }
   var derived=rcDeriveAll();
   Object.keys(derived).forEach(function(mk){ PM_DATA[mk]=derived[mk]; });
 }

@@ -77,6 +77,7 @@ RENDER_JS = """function rcApply(){
   var covDen={};     // per-period team speed: {sp: sum SP completed, n: count}
   var wipItems=[];   // [FIX-A4] filtered WIP snapshot items
   var usedKeys={};  // unique issue keys participating in this calculation
+  var velSP={};    // [P24-D] Velocity: story points per bucket
   items.forEach(function(it){
     if(!rcDimMatch(it, dim, sel)) return;
     if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
@@ -181,13 +182,12 @@ RENDER_JS = """function rcApply(){
       agg[key]+=it[cfg.field];
     } else { // count
       if(!agg[key]) agg[key]=0;
-      // [P1-STATES] Velocity SP state: sum the story points instead of
-      // counting issues (Story Point Velocity). Items state / auto → count.
-      if(rcMetric==='velocity' && rcMetricState('velocity').state==='sp'){
-        agg[key]+=(it.sp||0);
-      } else {
-        agg[key]++;
-      }
+      // [P1-STATES] Velocity: count issues here and collect the story points
+      // separately. [P24-D] The SP/items state is resolved AFTER the window
+      // snapshot (RC_WIN_STATE) — reading it here used the PREVIOUS pass's
+      // snapshot, so the bars could be SP while the label said items.
+      agg[key]++;
+      if(rcMetric==='velocity'){ velSP[key]=(velSP[key]||0)+(it.sp||0); }
     }
   });
   // ---- Backlog Health (coverage): team-speed denominator ------------------
@@ -301,6 +301,19 @@ RENDER_JS = """function rcApply(){
       if(typeSel && !typeSel[rcTypeLabel(v.type)]) return false;
       return true;
     });
+    // [P24-D] SP fill-rate of the window's velocity items (the auto rule:
+    // Story Point Velocity only when ≥ 50% of the completed items carry
+    // story points — the same 50% rule Defect Density uses).
+    var velTot=0, velFilled=0;
+    (PM_DATA.velocity||[]).forEach(function(v){
+      var tv=new Date(v.dev_start);
+      if(isNaN(tv)) return;
+      if(from&&tv<from) return;
+      if(to&&tv>to) return;
+      if(!rcDimMatch(v, dim, sel)) return;
+      if(typeSel && !typeSel[rcTypeLabel(v.type)]){ return; }
+      velTot++; if((v.sp||0)>0) velFilled++;
+    });
     var bfIts=filteredItems.filter(function(it){ return it.timeSpent!==undefined; });
     var w2=0; bfIts.forEach(function(it){ if((it.timeSpent||0)>0) w2++; });
     var sd=(rcDraft||RC_SETTINGS||{}).sprintData||'auto';
@@ -308,6 +321,7 @@ RENDER_JS = """function rcApply(){
     return {
       ddMode: ddMode, ddFillRate: ddFillRate, ddFilled: ddFilled, ddTotal: ddTotal,
       hasSP: hasSP,
+      velSpFill: velTot ? velFilled/velTot : 0,
       sprintsAvail: (sd==='available') ? true : (sd==='none') ? false
         : (typeof RC_HAS_SPRINTS_DATA==='undefined') ? true : !!RC_HAS_SPRINTS_DATA,
       velocityMode: vm2,
@@ -328,47 +342,21 @@ RENDER_JS = """function rcApply(){
   var rcNA = rcMetric==='reviewcycle' && !rcMetricState('reviewcycle').computable;
   // [P19-B3] Backlog Health: N/A when no ready status exists in the history.
   var bhNA = rcMetric==='backlog' && !rcMetricState('backlog').computable;
+  // [P24-D] Velocity in the Story Point state: the bars carry the SP sum
+  // (resolved from the FRESH snapshot — the same state the label, axis and
+  // Avg box read below).
+  if(rcMetric==='velocity' && rcMetricState('velocity').state==='sp'){
+    Object.keys(agg).forEach(function(k){ agg[k]=velSP[k]||0; });
+  }
   // [P1-STATES] Velocity: forced SP state without story points → N/A.
   var vForcedNA = rcMetric==='velocity' && (function(){
     var vm=((rcDraft||RC_SETTINGS).metrics||{}).velocity||{};
     return vm.velocityMode==='sp' && !rcWindowHasSP();
   })();
-  // [FIX-A4] Last-N bucket keys ENDING at the bucket containing lastD —
-  // the WIP snapshot axis (periods without completions still appear).
-  function rcLastBuckets(lastD, n){
-    var keys=[], guard=0;
-    var cur=rcBucketStart(lastD, gran);
-    var step=(gran==='daily')?1:(gran==='weekly')?7:(gran==='sprint')?14
-            :(gran==='monthly')?1:(gran==='quarterly')?3:12;
-    while(keys.length<n && guard<2000){
-      keys.push(rcBucketKey(cur, gran));
-      if(gran==='daily'||gran==='weekly'||gran==='sprint') cur.setDate(cur.getDate()-step);
-      else if(gran==='annual') cur.setFullYear(cur.getFullYear()-step);
-      else cur.setMonth(cur.getMonth()-step);
-      guard++;
-    }
-    return keys.reverse();
-  }
-  var periods;
-  if(isCoverage){
-    // [P1v3-1b] The default window anchors on the READY side only — the
-    // latest readiness start among the ready population (Backlog Health
-    // describes the ready backlog; the completion history is a denominator,
-    // not a time reference). Fallbacks: latest creation among the metric's
-    // numerator types → latest creation among all Jira items. Then the same
-    // last-N-buckets walk the WIP snapshot uses — buckets without
-    // completions stay in the axis (rendered as zero bars, P1v3-1e).
-    periods=null;
-  }
-  else if(isWipSnap){
-    // [FIX-A4] Bucket-ends from the AXIS (rcAxisRange / last-N buckets),
-    // NOT from the items — periods without completions still get a point.
-    periods=null;
-  }
-  else if(isFlow){ periods=[].concat.apply([],Object.keys(seriesAgg).map(function(s){return Object.keys(seriesAgg[s]);})); }
-  else if(isGrouped){ periods=Object.keys(groupAgg); }
-  else { periods=Object.keys(agg); }
-  if(periods!==null) periods=Array.from(new Set(periods)).sort();
+  // [P24-A] The axis ALWAYS comes from the window (calendar range or the
+  // shared default window) — never from the buckets that happen to carry
+  // items, so empty periods stay visible and every metric shares the axis.
+  var periods=[];
   var granLabel = RC_GRAN_LABEL[gran] || 'Sprint (2 weeks)';
   var rangeUsed = false;
   if(hasCustom){
@@ -393,72 +381,20 @@ RENDER_JS = """function rcApply(){
     if(rangeFrom && rangeTo){
       periods = rcAxisRange(rangeFrom, rangeTo, gran);
     }
-  } else if(periods===null){
-    // [P0-2] Effective window size: the metric's defaultN setting wins over
-    // the per-metric defaultN setting wins; RC_DEFAULT_N is the fallback.
+  } else {
+    // [P24-A] No calendar: EVERY metric uses the same window — the last N
+    // CONTIGUOUS periods ending at the project activity anchor
+    // (rcProjectAnchor: last bucket with real project activity, stray late
+    // events ignored). N = the metric's defaultN, else RC_DEFAULT_N.
     var effN=(mEff.defaultN!==undefined&&mEff.defaultN!==null)?mEff.defaultN:RC_DEFAULT_N;
-    if(isCoverage){
-      // [P1v3-1b] Backlog Health, no calendar: the anchor is the LATEST
-      // readiness start among the ready population (ready side only).
-      // Fallbacks: latest creation among the metric's numerator types →
-      // latest creation among all Jira items → empty state.
-      var lastReady=null;
-      covReady.forEach(function(iv){ if(!lastReady||iv.rf>lastReady) lastReady=iv.rf; });
-      var anchorD = lastReady ? new Date(lastReady) : null;
-      if(!anchorD){
-        (PM_DATA.backlog||[]).forEach(function(it){
-          var t=new Date(it.dev_start);
-          if(!isNaN(t)&&(!anchorD||t>anchorD)) anchorD=t;
-        });
-      }
-      if(!anchorD){
-        (RC_RAW||[]).forEach(function(r){
-          var t=r.created?new Date(r.created):null;
-          if(!isNaN(t)&&(!anchorD||t>anchorD)) anchorD=t;
-        });
-      }
-      periods = anchorD ? rcLastBuckets(anchorD, effN) : [];
-    } else if(isClarcycle || isReviewcycle){
-      // [P2v3-1/2] Default window anchors: clarcycle — the latest dev-start
-      // transition among the metric's items; reviewcycle — the latest done
-      // transition among the reviewed items. Fallbacks: latest item date →
-      // latest creation → empty state.
-      var lastA=null;
+    var anchorD=rcProjectAnchor(gran);
+    if(!anchorD){
       items.forEach(function(it){
         var t=new Date(it.dev_start);
-        if(!isNaN(t)&&(!lastA||t>lastA)) lastA=t;
+        if(!isNaN(t)&&(!anchorD||t>anchorD)) anchorD=t;
       });
-      if(!lastA){
-        (PM_DATA[rcMetric]||[]).forEach(function(it){
-          var t=new Date(it.dev_start);
-          if(!isNaN(t)&&(!lastA||t>lastA)) lastA=t;
-        });
-      }
-      periods = lastA ? rcLastBuckets(lastA, effN) : [];
-    } else {
-    // [FIX-A4] WIP snapshot, no calendar: the last N buckets ending at the
-    // bucket containing the latest WIP activity.
-    // [P6-B1] The anchor = max(enterDev, leaveDev) — an item that entered
-    // dev earlier but LEFT inside a later bucket must keep that bucket in
-    // the window (the WIP population last changed at the leave transition).
-    var lastWip=null;
-    wipItems.forEach(function(it){
-      var tE=(it.enterDev!==null&&it.enterDev!==undefined)?it.enterDev:null;
-      var tL=(it.leaveDev!==null&&it.leaveDev!==undefined)?it.leaveDev:null;
-      var t=new Date(Math.max(tE||0, tL||0));
-      if(!isNaN(t)&&(!lastWip||t>lastWip)) lastWip=t;
-    });
-    // [P0-2] Effective window size: the metric's defaultN setting wins over
-    // the per-granularity static default.
-    periods = lastWip ? rcLastBuckets(lastWip, effN) : [];
     }
-  } else {
-    // No calendar: Sprint -> last N sprints (settings), other granularities
-    // -> the last active bucket (day / week / month / quarter / year).
-    // [P0-2] Effective window size: the metric's defaultN setting wins over
-    // the RC_DEFAULT_N fallback.
-    var effN=(mEff.defaultN!==undefined&&mEff.defaultN!==null)?mEff.defaultN:RC_DEFAULT_N;
-    periods = periods.slice(-(effN));
+    periods = anchorD ? rcLastBucketKeys(anchorD, effN, gran) : [];
   }
   // ---- Backlog Health (coverage): per-period values -----------------------
   // BH(P) = ready(P) ÷ avg team speed per period:
@@ -534,13 +470,13 @@ RENDER_JS = """function rcApply(){
   // Resolve flow series keys/labels once (used by both the average box and the
   // flow chart branch). Flow series may be opened/resolved (Opened vs Resolved)
   // or new/resolved (Bug Growth).
-  var sKeys=Object.keys(seriesAgg||{});
-  var openKey = sKeys.indexOf('opened')>=0 ? 'opened'
-              : (sKeys.indexOf('new')>=0 ? 'new' : (sKeys[0]||'opened'));
-  var resolKey = sKeys.indexOf('resolved')>=0 ? 'resolved'
-               : (sKeys.filter(function(k){ return k!==openKey; })[0] || null);
-  var openLabel = openKey==='new' ? 'New' : (openKey==='opened' ? 'Opened' : openKey);
-  var resolLabel = resolKey==='resolved' ? 'Resolved' : (resolKey||'Resolved');
+  // [P24-A] FIXED series keys per metric — both series are always drawn
+  // (0 in periods without items). The old data-driven pick fell back to
+  // 'resolved' for BOTH series when the window held no opened items.
+  var openKey = (rcMetric==='bugflow') ? 'new' : 'opened';
+  var resolKey = 'resolved';
+  var openLabel = openKey==='new' ? 'New' : 'Opened';
+  var resolLabel = 'Resolved';
   // Weighted average over the selected window (top-right box).
   // avg-days: sum(days)/count(items); rate: total n / total total;
   // count: total per period / #periods; grouped: total per period / #periods;
@@ -590,7 +526,10 @@ RENDER_JS = """function rcApply(){
       if(ddForcedNA){
         avgText = 'n/a — no story points in data';
       } else {
-        var dn2=0,dt2=0; periods.forEach(function(p){ dn2+=(agg[p]&&agg[p].n)||0; dt2+=(agg[p]&&agg[p].total)||0; });
+        // [P24-D] Weighted over the COMPUTABLE periods only (denominator >
+        // 0) — the same periods that carry a bar. Defects of a period
+        // without completed work have no bar and must not feed the box.
+        var dn2=0,dt2=0; periods.forEach(function(p){ if(agg[p]&&agg[p].total>0){ dn2+=agg[p].n||0; dt2+=agg[p].total; } });
         if(!dt2){
           avgText = 'Avg: n/a';
         } else {
@@ -671,6 +610,17 @@ RENDER_JS = """function rcApply(){
     avgEl.textContent = avgText;
     avgEl.classList.toggle('hidden', avgText.indexOf('n/a')>=0);
   }
+  // [P24-C] Declared BEFORE the dataset branches that read them (they were
+  // hoisted as undefined there).
+  // [P0-TYPES] Empty type selection in the metric settings -> no conclusion
+  // at all (uniform N/A behaviour). NOTE: an empty result caused by the
+  // calendar/dimension filters still renders the trend conclusion (the
+  // selection is legitimate — the metric simply has no data in range).
+  var emptyTypes = Array.isArray(mEff.types) && mEff.types.length===0;
+  // [P12-P4] The TOP Issue Type checkboxes may also be emptied — with
+  // typeSel={} every item is skipped, the series is all-null and a flat
+  // 0-trend would produce a false «Stable» verdict.
+  var noTypesSelected = typeSel && Object.keys(typeSel).length===0;
   var labels=periods;
   var datasets=[], trend=null;
   var balTrend=null;   // [P0-3] single source of truth: flow trend = balance
@@ -688,7 +638,7 @@ RENDER_JS = """function rcApply(){
     // the net balance (Resolved − Opened). The old ratio trend (opened ÷
     // resolved) could point the opposite way from the conclusion.
     var balance=openedVals.map(function(v,i){ return resolvedVals[i]-v; });
-    balTrend=rcLinearTrend(balance);
+    balTrend=rcLinearTrend(balance, true);
     var balLabel=(rcMetric==='bugflow') ? 'Trend (Resolved − New)' : 'Trend (Resolved − Opened)';
     datasets=[
       {type:'bar', label:openLabel, data:openedVals,
@@ -764,7 +714,15 @@ RENDER_JS = """function rcApply(){
     datasets=[{type:'bar', label:cfg.label, data:periods.map(function(){return 0;}),
       backgroundColor:'rgba(148,163,184,0.25)', borderColor:'#94a3b8', borderWidth:1}];
   } else {
-    var values=periods.map(function(p){ return rcAggValue(cfg, agg[p]); });
+    // [P24-A] Count/sum metrics: a period without items is a measured 0
+    // (nothing was completed), not a gap — the bars, Avg box, Δ and the
+    // trend all read the same zero-filled series. Averages and rates keep
+    // the gap (no items → no measurement).
+    var zeroFill = (cfg.aggregation==='count'||cfg.aggregation==='sum') && !cfg.rateMode;
+    var values=periods.map(function(p){
+      var v=rcAggValue(cfg, agg[p]);
+      return (zeroFill && (v===null||v===undefined)) ? 0 : v;
+    });
     // [P0-TYPES] Empty type selection in the metric settings -> no trend
     // line (a flat 0-trend over an empty selection is misleading). An empty
     // result from the calendar/dimension filters keeps the trend.
@@ -775,7 +733,7 @@ RENDER_JS = """function rcApply(){
       ? null
       : rcLinearTrend(values);
     datasets=[
-      {type:'bar', label:cfg.label, data:values,
+      {type:'bar', label:(rcMetric==='velocity' ? rcMetricDisplayName('velocity') : cfg.label), data:values,
        backgroundColor:cfg.color+'99', borderColor:cfg.color, borderWidth:1}
     ];
     if(trend){ datasets.push({type:'line', label:'Trend', data:trend.line, borderColor:'#ef4444',
@@ -796,34 +754,31 @@ RENDER_JS = """function rcApply(){
   // Flow (Opened vs Resolved): trend of the net balance (resolved - opened).
   // A rising balance means resolved is catching up with opened => improving.
   var conclEl=document.getElementById('rcConclusion');
-  // [P0-2] Effective threshold: the metric settings win, static config is the
-  // fallback — the SAME value rcTrendRule renders in the tooltip.
-  var thr=(mEff.threshold!==undefined&&mEff.threshold!==null)?mEff.threshold:(cfg.threshold||0.05);
-  // [P1-4] Δ% vs prev: percentage change of the last period's value against
-  // the previous one. prev=0 -> 'Δ n/a' (no division by zero); fewer than
-  // two periods with data -> no Δ block. dec = decimals (1 default, 0 for
-  // the integer flow counters).
+  // [P24-C] Stable band (%) of the relative trend rule — the metric
+  // settings win, the static config is the fallback (the SAME value
+  // rcTrendRule renders in the tooltip).
+  var stablePct=rcStablePct(rcMetric);
+  var dirUp=((((RC_SETTINGS.metrics||{})[rcMetric]||{}).trendDir
+              || cfg.trend_dir || 'down') === 'up');
+  // [P1-4] Δ% = the LAST period of the window against the PREVIOUS
+  // (adjacent) one. [P24-C] Never skips an empty period: when either of the
+  // two has no data the Δ is n/a. prev=0 -> 'Δ n/a' (no division by zero).
   function rcDeltaPct(last, prev, dec){
-    if(last===null||last===undefined||prev===null||prev===undefined) return '';
+    if(last===null||last===undefined||prev===null||prev===undefined) return 'Δ n/a';
     if(prev===0) return 'Δ n/a';
     var d=(last-prev)/prev*100;
     var s=d>=0?'+':'−';
-    return 'Δ '+s+(Math.abs(d)).toFixed(dec===undefined?1:dec)+'% vs prev';
+    return 'Δ '+s+(Math.abs(d)).toFixed(dec===undefined?1:dec)+'% last vs prev period';
   }
   function rcLastTwo(vals){
-    var def=vals.filter(function(v){ return v!==null&&v!==undefined; });
-    if(def.length<2) return null;
-    return {last:def[def.length-1], prev:def[def.length-2]};
+    if(!vals || vals.length<2) return null;
+    return {last:vals[vals.length-1], prev:vals[vals.length-2]};
   }
-  // [P0-TYPES] Empty type selection in the metric settings -> no conclusion
-  // at all (uniform N/A behaviour). NOTE: an empty result caused by the
-  // calendar/dimension filters still renders the trend conclusion (the
-  // selection is legitimate — the metric simply has no data in range).
-  var emptyTypes = Array.isArray(mEff.types) && mEff.types.length===0;
-  // [P12-P4] The TOP Issue Type checkboxes may also be emptied — with
-  // typeSel={} every item is skipped, the series is all-null and a flat
-  // 0-trend would produce a false «Stable» verdict.
-  var noTypesSelected = typeSel && Object.keys(typeSel).length===0;
+  function rcDeltaText(vals, dec){
+    var d=rcLastTwo(vals);
+    return d ? rcDeltaPct(d.last, d.prev, dec) : '';
+  }
+  var trendOk=false;
   if((cfg.requires==='timeSpent' && !RC_WIN_STATE.hasTimespent) || erNA || drNA || rcNA || bhNA
      || ddForcedNA || vForcedNA
      || (isCoverage && !!(RC_WIN_STATE&&RC_WIN_STATE.covSPMissing))){
@@ -849,17 +804,42 @@ RENDER_JS = """function rcApply(){
   } else if(emptyTypes || noTypesSelected){
     // [P12-P4] No verdict on an empty selection (settings OR top checkboxes).
     conclEl.textContent='';
-  } else if(isFlow && openedVals.length>1){
-    // [P0-3] Reuse the SAME balTrend the chart line was drawn from.
-    if(balTrend && balTrend.slope!==null){
-      var c = balTrend.slope > thr ? '🟢 Improving' : (balTrend.slope < -thr ? '🔴 Degrading' : '🟡 Stable');
+  } else if(isFlow){
+    // [P24-C/E] Flow verdict = net LEVEL + balance TREND:
+    //   net%   = Σ(resolved − opened) ÷ Σ(resolved + opened) × 100 over the window;
+    //   trend% = balance slope × (n−1) ÷ mean per-series flow per period × 100.
+    //   net% < −band and the balance is not clearly rising → 🔴 Degrading
+    //   (the backlog grows); net% > band and not clearly falling → 🟢
+    //   Improving; otherwise the balance trend decides (|trend%| ≤ band → 🟡).
+    var oSum=openedVals.reduce(function(a,b){return a+b;},0);
+    var rSum=resolvedVals.reduce(function(a,b){return a+b;},0);
+    var T=oSum+rSum, net=rSum-oSum, nP=openedVals.length;
+    if(!T){
+      conclEl.textContent='No activity in the window — no trend';
+    } else if(nP<RC_TREND_MIN_POINTS || !balTrend){
+      conclEl.textContent='Not enough data for a trend ('+nP+' of '+nP+' periods; ≥ '+RC_TREND_MIN_POINTS+' needed)';
+    } else {
+      var netPct=net/T*100;
+      var meanFlow=T/(2*nP);
+      var trPct=meanFlow ? balTrend.slope*(nP-1)/meanFlow*100 : 0;
+      var lvl = netPct>stablePct ? 'pos' : (netPct<-stablePct ? 'neg' : 'bal');
+      var tr  = trPct>stablePct ? 'up' : (trPct<-stablePct ? 'down' : 'flat');
+      var cls = (lvl==='neg' && tr!=='up') ? 'degrading'
+              : (lvl==='pos' && tr!=='down') ? 'improving'
+              : (tr==='up' ? 'improving' : (tr==='down' ? 'degrading' : 'stable'));
+      trendOk=true;
+      var ow=openLabel.toLowerCase();
+      var netTxt = 'net '+(net>=0?'+':'−')+Math.abs(net)+' over window ('
+        + (lvl==='neg' ? ow+' exceed resolved — backlog growing'
+           : lvl==='pos' ? 'resolved exceed '+ow+' — backlog shrinking'
+           : 'balanced')+')';
+      var c = rcVerdictWord(cls)+' · '+netTxt
+        +' · balance trend '+(trPct>=0?'+':'−')+Math.abs(trPct).toFixed(0)+'%';
       // [P1-4] Two Δ blocks: one per series (integer counters).
-      var oD=rcDeltaPct(openedVals[openedVals.length-1], openedVals[openedVals.length-2], 0);
-      var rD=rcDeltaPct(resolvedVals[resolvedVals.length-1], resolvedVals[resolvedVals.length-2], 0);
-      if(oD) c += ' · '+openLabel+' '+oD;
-      if(rD) c += ' · '+resolLabel+' '+rD;
+      c += ' · '+openLabel+' '+rcDeltaText(openedVals, 0);
+      c += ' · '+resolLabel+' '+rcDeltaText(resolvedVals, 0);
       conclEl.textContent = c;
-    } else { conclEl.textContent = ''; }
+    }
   } else if(isCoverage){
     // [P1v3-1e] The band judgement uses the MOST RECENT COMPUTABLE control
     // point (ready>0 && velocity>0) — not the last bucket: a zero bar is a
@@ -877,7 +857,9 @@ RENDER_JS = """function rcApply(){
       // [P22-T5] Δ% must compare MEASUREMENTS, not placeholders: filter to
       // the computable control points before taking the last two.
       var covD=(function(){
-        var compVals=covVals.filter(function(_, i){ return covComputable[i]; });
+        // [P24-C] Δ = last vs the ADJACENT previous period (n/a when either
+        // control point is not computable or the previous one is 0).
+        var compVals=covVals.map(function(v, i){ return covComputable[i]?v:null; });
         var d=rcLastTwo(compVals);
         return d?rcDeltaPct(d.last,d.prev,1):'';
       })();
@@ -890,29 +872,27 @@ RENDER_JS = """function rcApply(){
         conclEl.textContent='🟡 Over-stocked ('+(Math.round(lastV*10)/10)+' sprints of ready work — grooming waste)'+(covD?' · '+covD:'')+perTxt;
       }
     }
-  } else if(!isFlow && trend && trend.slope!==null){
-    // Trend direction is a semantic property of the metric DEFINITION
-    // (which slope direction means "Improving") — read from the metric
-    // definition in the settings (schema), with the display config as a
-    // fallback. It is NOT a user-editable setting.
-    var up = (((RC_SETTINGS.metrics||{})[rcMetric]||{}).trendDir
-              || cfg.trend_dir || 'down') === 'up';
-    var slope = trend.slope;
-    var c = (up ? (slope > thr ? '🟢 Improving' : (slope < -thr ? '🔴 Degrading' : '🟡 Stable'))
-                : (slope < -thr ? '🟢 Improving' : (slope > thr ? '🔴 Degrading' : '🟡 Stable')));
-    // [P1-4] Δ% vs prev from the same per-period values the bars use.
+  } else if(!isFlow){
+    // [P24-C] ONE relative trend rule for every single-series metric, read
+    // from the SAME per-period values the bars show (rcTrendVerdict).
     var serVals=null;
     if(isWipSnap){ serVals=wipVals; }
-    else if(isGrouped){ serVals=periods.map(function(p){ var s=0; (cfg.groups||['Critical','Major','Minor']).forEach(function(g){ s+=(groupAgg[p]&&groupAgg[p][g])||0; }); return s; }); }
-    else if(cfg.rateMode==='spDensity'||cfg.rateMode==='roles'||cfg.aggregation==='rate'||cfg.aggregation==='allocation'){
-      serVals=periods.map(function(p){ return rcAggValue(cfg, agg[p]); });
-    } else {
-      serVals=periods.map(function(p){ var arr=agg[p]||[]; if(!arr.length) return null; var s=0; arr.forEach(function(v){ s+=(v&&typeof v==='object'&&v.eff!==undefined)?v.eff:v; }); return s/arr.length; });
-    }
-    var dd=rcLastTwo(serVals);
-    if(dd) c += ' · '+rcDeltaPct(dd.last, dd.prev, 1);
+    else if(isGrouped){ serVals=totals; }
+    else { serVals=values; }
+    var tv=rcTrendVerdict(serVals||[], dirUp?'up':'down', stablePct);
+    trendOk=!!tv.ok;
+    var c=rcTrendText(tv, (serVals||[]).length);
+    var dTxt=rcDeltaText(serVals||[], 1);
+    if(dTxt) c += ' · '+dTxt;
     conclEl.textContent = c;
   } else { conclEl.textContent = ''; }
+  // [P24-C] The dashed trend line is drawn ONLY when the verdict rule has
+  // enough data (≥ RC_TREND_MIN_POINTS periods) — a line without a verdict
+  // would suggest a trend the rule does not support. Backlog Health keeps
+  // its line (band rule, no slope verdict).
+  if(!isCoverage && !trendOk){
+    datasets=datasets.filter(function(d){ return !(d.type==='line' && /^Trend/.test(String(d.label||''))); });
+  }
   // [P1-STATES] The state surfaces: title, y-axis, axis-note, avg-box unit
   // and the metric-list button suffix all follow the ACTIVE state.
   var rcSt = rcMetricState(rcMetric);
@@ -955,9 +935,9 @@ RENDER_JS = """function rcApply(){
       baseNote = 'Y-axis: Issue Lead Time (days)';
     }
     note.textContent = baseNote + ' · X-axis: ' + granLabel + ' buckets' +
-      (rangeUsed ? ' (calendar range applied)' :
-        (gran==='sprint' ? ' · Default: last 5 sprints with project activity'
-                         : ' · Default: last active ' + granLabel.toLowerCase()));
+      ((rangeUsed && rcCalTouchedCur()) ? ' (calendar range applied)' :
+        ' · Default: last '+periods.length+' '+(gran==='sprint'?'sprints (2-week periods)':granLabel.toLowerCase()+' periods')
+        +' up to the last active period of the project');
     if(rcMetric==='wip'){
       note.textContent += ' · Snapshot at the end of each period; for the customary daily WIP snapshot set Periods = Daily.';
     }
@@ -976,18 +956,32 @@ RENDER_JS = """function rcApply(){
   //   All other metrics: rcBucketKey(dev_start) is among the displayed
   //     buckets (same filters as the aggregation loop).
   // The rebuild iterates items (they carry .key) — never covReady (no .key).
+  // [P24-T] Each used issue also records its own metric value (the per-item
+  // contribution to the chart) for the table's Metric value column.
+  var tblVals={};
+  var velSpMode=(rcMetric==='velocity' && rcMetricState('velocity').state==='sp');
+  function tblPut(it, kind){
+    var v=rcTableItemValue(rcMetric, it, {velSp:velSpMode, ddMode:ddMode, kind:kind});
+    if(!v) return;
+    var cur=tblVals[it.key];
+    if(!cur){ tblVals[it.key]={txt:[v.txt], num:v.num}; return; }
+    if(cur.txt.indexOf(v.txt)<0) cur.txt.push(v.txt);
+    if(v.num!==null && (cur.num===null || v.num>cur.num)) cur.num=v.num;
+  }
   (function(){
     var periodSet={};
     periods.forEach(function(p){ periodSet[p]=1; });
     var peAll=periods.map(function(p){ return rcBucketEnd(p, gran); });
-    var rebuilt={};
+    // [P24-T] The first aggregation pass may have added keys outside the
+    // displayed buckets — the table is rebuilt from scratch here.
+    usedKeys={};
     if(isWipSnap){
       wipItems.forEach(function(it){
         var eD=it.enterDev;
         if(eD===null||eD===undefined) return;
         for(var pi=0;pi<peAll.length;pi++){
           var E=peAll[pi];
-          if(eD<=E && (it.leaveDev===null||it.leaveDev===undefined||it.leaveDev>E)){ usedKeys[it.key]=1; return; }
+          if(eD<=E && (it.leaveDev===null||it.leaveDev===undefined||it.leaveDev>E)){ usedKeys[it.key]=1; tblPut(it,'wip'); return; }
         }
       });
     } else if(isCoverage){
@@ -999,7 +993,7 @@ RENDER_JS = """function rcApply(){
         if(it.readyFromUnverified && from && rf<from.getTime()) rf=from.getTime();
         for(var pi=0;pi<peAll.length;pi++){
           var E=peAll[pi];
-          if(rf<=E && (rl===null||rl>E)){ usedKeys[it.key]=1; return; }
+          if(rf<=E && (rl===null||rl>E)){ usedKeys[it.key]=1; tblPut(it,'ready'); return; }
         }
       });
       var BH_DEN2={Story:1,Task:1,Defect:1};
@@ -1010,7 +1004,7 @@ RENDER_JS = """function rcApply(){
         if(to&&t>to) return;
         if(!rcDimMatch(v, dim, sel)) return;
         if(!BH_DEN_TYPES[rcTypeLabel(v.type)]) return;
-        if(periodSet[rcBucketKey(t, gran)]) usedKeys[v.key]=1;
+        if(periodSet[rcBucketKey(t, gran)]){ usedKeys[v.key]=1; tblPut(v,'speed'); }
       });
     } else {
       items.forEach(function(it){
@@ -1020,12 +1014,15 @@ RENDER_JS = """function rcApply(){
         if(isNaN(t)) return;
         if(from&&t<from) return;
         if(to&&t>to) return;
-        if(periodSet[rcBucketKey(t, gran)]) usedKeys[it.key]=1;
+        if(periodSet[rcBucketKey(t, gran)]){ usedKeys[it.key]=1; tblPut(it); }
       });
     }
   })();
   // Issues table: unique issues that participated in this calculation.
   RC_TABLE.rows=Object.keys(usedKeys);
+  RC_TABLE.vals=tblVals;
+  var vHdr=document.getElementById('rcTableValHdr');
+  if(vHdr){ vHdr.textContent=rcTableValueHeader(rcMetric, velSpMode); }
   RC_TABLE.page=0;
   rcRenderTable();
   if(rcChart){ rcChart.destroy(); }
@@ -1078,6 +1075,73 @@ function rcNatCmp(ka, kb){
   var a2=String(ka), b2=String(kb);
   return a2<b2 ? -1 : (a2>b2 ? 1 : 0);
 }
+// [P24-T] Per-item metric value shown in the issues table — what this
+// issue contributes to the plotted metric (Jira data only).
+function rcTableValueHeader(mk, velSp){
+  var cfg=RC_CFG[mk]||{};
+  var f=cfg.field;
+  if(f==='days') return 'Value (days)';
+  if(f==='eff') return 'Flow efficiency (%)';
+  if(f==='cycles') return 'Clarification cycles';
+  if(f==='count') return 'Re-review cycles';
+  if(f==='reworked') return 'Reworked';
+  if(f==='series') return 'Series';
+  if(f==='severity') return 'Severity';
+  if(cfg.aggregation==='coverage') return 'Role in Backlog Health';
+  if(cfg.aggregation==='wipSnapshot') return 'WIP';
+  if(mk==='velocity') return velSp?'Story points':'Completed';
+  if(mk==='bugfix') return 'Role · time spent (h)';
+  if(cfg.rateMode==='roles'||cfg.rateMode==='spDensity') return 'Role';
+  return 'Counted';
+}
+function rcTableItemValue(mk, it, ctx){
+  ctx=ctx||{};
+  var cfg=RC_CFG[mk]||{};
+  var f=cfg.field;
+  function num(x){ return (x===null||x===undefined||isNaN(x))?null:Number(x); }
+  function r1(x){ return Math.round(x*10)/10; }
+  if(f==='days'){ var d=num(it.days); return {txt:d===null?'—':String(r1(d)), num:d}; }
+  if(f==='eff'){ var e=num(it.eff); return {txt:e===null?'—':(r1(e)+'%'), num:e}; }
+  if(f==='cycles'||f==='count'){ var c=num(it[f]); return {txt:c===null?'—':String(c), num:c}; }
+  if(f==='reworked'){ return {txt:it.reworked?'Yes':'No', num:it.reworked?1:0}; }
+  if(f==='series'){
+    var sl=(it.series==='new')?'New':(it.series==='opened'?'Opened':'Resolved');
+    return {txt:sl, num:null};
+  }
+  if(f==='severity'){ return {txt:String(it.severity||'—'), num:null}; }
+  if(ctx.kind==='wip') return {txt:'In dev at period end', num:null};
+  if(ctx.kind==='ready') return {txt:'Ready (numerator)', num:null};
+  if(ctx.kind==='speed') return {txt:'Completed (team speed)', num:null};
+  if(mk==='velocity'){
+    if(ctx.velSp){ var sp=num(it.sp)||0; return {txt:String(sp), num:sp}; }
+    return {txt:'1', num:1};
+  }
+  if(mk==='defectdensity'){
+    if(it.role==='numerator') return {txt:'Defect found in QA', num:null};
+    var dsp=num(it.sp)||0;
+    return {txt:ctx.ddMode==='per_sp'?('Completed · '+dsp+' SP'):'Completed item', num:ctx.ddMode==='per_sp'?dsp:null};
+  }
+  if(mk==='bugfix'){
+    var h=r1((num(it.timeSpent)||0)/3600);
+    return {txt:(it.role==='numerator'?'Bug fix':'All work')+' · '+h+'h', num:h};
+  }
+  if(mk==='leakage'){ return {txt:it.role==='numerator'?'Leaked to prod':'QA-entered / prod', num:null}; }
+  if(mk==='escapereview'){ return {txt:it.role==='numerator'?'Found in QA':'Review / QA defect', num:null}; }
+  return {txt:'1', num:1};
+}
+function rcTableCmpVal(a, b, dir){
+  var va=a.__valNum, vb=b.__valNum;
+  var ea=(va===null||va===undefined), eb=(vb===null||vb===undefined);
+  if(ea&&eb){
+    var sa=String(a.__val||''), sb=String(b.__val||'');
+    if(sa!==sb) return (sa<sb?-1:1)*dir;
+    return rcNatCmp(a.__key, b.__key)*dir;
+  }
+  if(ea) return 1*dir;
+  if(eb) return -1*dir;
+  if(va!==vb) return (va-vb)*dir;
+  return rcNatCmp(a.__key, b.__key)*dir;
+}
 // [P2-I16] The days_in_status comparator, factored out so the tiebreak
 // semantics are testable and shared: empties last on ascending / first on
 // descending; ties (incl. both-empty) resolve by the natural key.
@@ -1095,7 +1159,9 @@ function rcRenderTable(){
   var body=document.getElementById('rcTableBody');
   if(!body) return;
   var D=RC_ISSUE_DIR||{};
-  var rows=RC_TABLE.rows.map(function(k){ var r=D[k]||null; if(r){ r.__key=k; } return r; }).filter(Boolean);
+  var TV=RC_TABLE.vals||{};
+  var rows=RC_TABLE.rows.map(function(k){ var r=D[k]||null; if(r){ r.__key=k;
+    var tv=TV[k]; r.__val=tv?tv.txt.join(', '):''; r.__valNum=tv?tv.num:null; } return r; }).filter(Boolean);
   var sk=RC_TABLE.sortKey, sd=RC_TABLE.sortDir;
   rows.sort(function(a,b){
     var va, vb;
@@ -1112,6 +1178,9 @@ function rcRenderTable(){
     // tie (including both-empty) falls through to the natural key sort.
     if(sk==='days_in_status'){
       return rcTableCmpDays(a, b, sd);
+    }
+    if(sk==='metric_value'){
+      return rcTableCmpVal(a, b, sd);
     }
     va=String(va===null||va===undefined?'':va);
     vb=String(vb===null||vb===undefined?'':vb);
@@ -1134,7 +1203,7 @@ function rcRenderTable(){
       '<td class="py-1.5 px-2">'+rcEsc(r.status)+'</td>'+
       '<td class="py-1.5 px-2">'+rcEsc(r.created)+'</td>'+
       '<td class="py-1.5 px-2">'+rcEsc(r.updated)+'</td>'+
-      '<td class="py-1.5 px-2">'+(r.days_in_status===null||r.days_in_status===undefined?'—':rcEsc(r.days_in_status))+'</td>'+
+      '<td class="py-1.5 px-2">'+(r.__val?rcEsc(r.__val):'—')+'</td>'+
       '</tr>';
   });
   body.innerHTML=html;
@@ -1148,7 +1217,7 @@ function rcRenderTable(){
 }
 function rcSortTable(key){
   if(RC_TABLE.sortKey===key){ RC_TABLE.sortDir=-RC_TABLE.sortDir; }
-  else { RC_TABLE.sortKey=key; RC_TABLE.sortDir=(key==='created'||key==='updated'||key==='days_in_status'||key==='id')?-1:1; }
+  else { RC_TABLE.sortKey=key; RC_TABLE.sortDir=(key==='created'||key==='updated'||key==='days_in_status'||key==='metric_value'||key==='id')?-1:1; }
   rcRenderTable();
 }
 function rcPage(delta){

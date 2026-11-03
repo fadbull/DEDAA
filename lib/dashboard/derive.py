@@ -14,6 +14,21 @@ function rcTypeLabel(t){
   if(low==='sub-task') return 'Sub-task';
   return String(t);
 }
+// [P24-P2] Label match by TOKEN (case-insensitive), not by substring:
+// "prod" matches the labels prod / PROD / Prod and the prefixed family
+// prod_* / prod-* (e.g. prod_issue), and the long form "production";
+// it does NOT match "product", "non-prod" or "preprod".
+function rcLabelHas(labels, want){
+  want=String(want||'').trim().toLowerCase();
+  if(!want) return false;
+  return String(labels||'').split(/[,;\\s]+/).some(function(l){
+    var v=l.trim().toLowerCase();
+    if(!v) return false;
+    if(v===want) return true;
+    if(v.indexOf(want+'_')===0 || v.indexOf(want+'-')===0) return true;
+    return want==='prod' && v==='production';
+  });
+}
 function rcDeriveAll(){
   var S=RC_SETTINGS, sets=S.statusSets||{};
   function stSet(name){
@@ -128,32 +143,36 @@ function rcDeriveAll(){
         }
       }
     }
-    // Cycle Time: start -> end
+    // Cycle Time: start -> end. [P24-B] Bucket = END anchor (completion):
+    // a completed-item time metric is reported in the period the item
+    // finishes — bucketing by the start keeps only the fast finishers in
+    // the recent periods (survivorship bias → false «Improving»).
     if(!!mtypes('cycletime')[lbl]){
       var ctS=anc(ev,cd,rd,mcfg('cycletime').start), ctE=anc(ev,cd,rd,mcfg('cycletime').end);
       if(ctS&&ctE&&ctE>ctS){
         var ctDays=Math.max(0,Math.floor((ctE-ctS)/86400000));
         // [P2-2] Zero-day rule (uniform across all time metrics).
-        if(ctDays>0) out.cycletime.push(item(ctS,{days:ctDays}));
+        if(ctDays>0) out.cycletime.push(item(ctE,{days:ctDays}));
       }
     }
-    // Time in QA: start -> end
+    // Time in QA: start -> end. [P24-B] Bucket = QA exit (completion).
     if(!!mtypes('qa')[lbl]){
       var qaS=anc(ev,cd,rd,mcfg('qa').start), qaE=anc(ev,cd,rd,mcfg('qa').end);
       if(qaS&&qaE&&qaE>qaS){
         var qaDays=Math.max(0,Math.floor((qaE-qaS)/86400000));
         // [P2-2] Zero-day rule.
-        if(qaDays>0) out.qa.push(item(qaS,{days:qaDays}));
+        if(qaDays>0) out.qa.push(item(qaE,{days:qaDays}));
       }
     }
-    // Flow Efficiency: active / total intervals
+    // Flow Efficiency: active / total intervals. [P24-B] Bucket = the
+    // total-interval END (completion).
     if(!!mtypes('floweff')[lbl]){
       var fa0=anc(ev,cd,rd,mcfg('floweff').active.start), fa1=anc(ev,cd,rd,mcfg('floweff').active.end);
       var ft0=anc(ev,cd,rd,mcfg('floweff').total.start), ft1=anc(ev,cd,rd,mcfg('floweff').total.end);
       if(fa0&&fa1&&ft0&&ft1&&fa1>fa0&&ft1>ft0){
         var act=Math.max(0,Math.floor((fa1-fa0)/86400000));
         var tot=Math.max(0,Math.floor((ft1-ft0)/86400000));
-        if(tot>0) out.floweff.push(item(ft0,{eff:act/tot*100.0,
+        if(tot>0) out.floweff.push(item(ft1,{eff:act/tot*100.0,
           active:act, total:tot}));   // [P0-TYPES] raw days for the weighted avg box
       }
     }
@@ -221,8 +240,8 @@ function rcDeriveAll(){
     }
     // [FIX-A3] Lead Time: Work Item Lead Time (created → done) for ANY
     // Issue Type — the top Issue Type filter picks the slice (Defect+Sub-bug
-    // = Bug Lead Time, Story+Task = Story/Task Lead Time). Bucket = created
-    // (the start anchor).
+    // = Bug Lead Time, Story+Task = Story/Task Lead Time). [P24-B] Bucket =
+    // the END anchor (completion) — not created (survivorship bias).
     if(!!mtypes('lead')[lbl]){
       // [P2-2] Zero-day items are excluded (incl. the resolutiondate
       // fallback — a 0-day fallback interval is not a real duration).
@@ -230,7 +249,7 @@ function rcDeriveAll(){
       if(lS&&lE&&lE>lS){
         var lDays=Math.max(0,Math.floor((lE-lS)/86400000));
         // [P2-2] Zero-day rule: floor(<24h)=0 → excluded.
-        if(lDays>0) out.lead.push(item(lS,{days:lDays}));
+        if(lDays>0) out.lead.push(item(lE,{days:lDays}));
       }
     }
     // [FIX-A4] WIP: point-in-time SNAPSHOT items — enterDev = first
@@ -320,7 +339,7 @@ function rcDeriveAll(){
     // prod-labelled ÷ (QA-entered ∪ prod-labelled) × 100, bucketed by
     // Created date for both roles.
     var lkLbl=rcProdLabelEff(String(mcfg('leakage').prodLabel||PROD), S).toLowerCase();
-    var hasProd=String(r.labels||'').toLowerCase().indexOf(lkLbl)>=0;
+    var hasProd=rcLabelHas(r.labels, lkLbl);
     if(cd&&!!mtypes('leakage')[lbl]){
       var lkInQA=false;
       for(var lq=0;lq<ev.length;lq++){
@@ -352,8 +371,8 @@ function rcDeriveAll(){
     var erQa=String((mcfg('escapereview')||{}).qaLabel||'').toLowerCase();
     var erRv=String((mcfg('escapereview')||{}).reviewLabel||'').toLowerCase();
     if(cd && erQa && erRv && erQa!==erRv && !!mtypes('escapereview')[lbl]){
-      var rlHit=String(r.labels||'').toLowerCase().indexOf(erRv)>=0;
-      var qlHit=String(r.labels||'').toLowerCase().indexOf(erQa)>=0;
+      var rlHit=rcLabelHas(r.labels, erRv);
+      var qlHit=rcLabelHas(r.labels, erQa);
       if(qlHit) out.escapereview.push(item(cd,{role:'numerator'}));
       if(qlHit||rlHit) out.escapereview.push(item(cd,{role:'denominator'}));
     }
@@ -371,7 +390,8 @@ function rcDeriveAll(){
         var drS=firstEv(ev, DR_S), drE=firstEv(ev, DR_D);
         if(drS&&drE&&drE>drS){
           var drDays=Math.max(0,Math.floor((drE-drS)/86400000));
-          if(drDays>0) out.designreview.push(item(drS,{days:drDays}));
+          // [P24-B] Bucketed by review completion (like every duration metric).
+          if(drDays>0) out.designreview.push(item(drE,{days:drDays}));
         }
       }
     }
@@ -421,8 +441,8 @@ function rcDeriveAll(){
         // [P6-B5] Prod-labelled defects are excluded from the DD numerator —
         // they belong to Production Leakage (the two populations must not
         // overlap: DD = found in QA, Leakage = leaked to prod).
-        var ddProd=String(r.labels||'').toLowerCase().indexOf(
-          rcProdLabelEff(String(mcfg('leakage').prodLabel||PROD), S).toLowerCase())>=0;
+        var ddProd=rcLabelHas(r.labels,
+          rcProdLabelEff(String(mcfg('leakage').prodLabel||PROD), S).toLowerCase());
         if(cd&&ddInQA&&!ddProd) out.defectdensity.push({key:r.key, project:r.project, team:r.team,
           epic:r.epic, person:r.person, type:r.type,
           role:'numerator', sp:(r.sp!==undefined&&r.sp!==null)?r.sp:0,

@@ -386,7 +386,7 @@ def _render_html_shell(ctx):
                           <th class="py-1.5 px-2 text-left cursor-pointer select-none" onclick="rcSortTable('status')">Status</th>
                           <th class="py-1.5 px-2 text-left cursor-pointer select-none" onclick="rcSortTable('created')">Created</th>
                           <th class="py-1.5 px-2 text-left cursor-pointer select-none" onclick="rcSortTable('updated')">Updated</th>
-                          <th class="py-1.5 px-2 text-left cursor-pointer select-none" onclick="rcSortTable('days_in_status')">Days in Status</th>
+                          <th id="rcTableValHdr" class="py-1.5 px-2 text-left cursor-pointer select-none" onclick="rcSortTable('metric_value')" title="What this issue contributes to the metric shown in the chart">Metric value</th>
                         </tr>
                       </thead>
                       <tbody id="rcTableBody"></tbody>

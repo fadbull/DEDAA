@@ -193,23 +193,26 @@ function rcTeamSourceChanged(){
 function rcTrendRule(mk, S){
   S=S||RC_SETTINGS;
   var m=(S.metrics||{})[mk]||{};
-  var thr=m.threshold!==undefined?m.threshold:0.05;
+  var band=rcStablePct(mk, S);
   var dir=m.trendDir||((RC_CFG[mk]||{}).trend_dir)||'down';
   if(m.aggregation==='coverage'){
     var lo=(m.targetMin!==undefined&&m.targetMin!==null)?m.targetMin:2;
     var hi=(m.targetMax!==undefined&&m.targetMax!==null)?m.targetMax:3;
     return 'Trend: band rule — '+lo+'–'+hi+' sprints of ready work = Healthy (🟢), below '+lo+' = Under-stocked (🔴), above '+hi+' = Over-stocked (🟡).';
   }
+  var common=' Needs ≥ '+RC_TREND_MIN_POINTS+' periods with data. Δ = last period vs the previous one.';
   if(m.aggregation==='flow'){
     // [P19-B1] The bugflow series is new-vs-resolved — the balance word
     // must match the series name ('new'), not 'opened'.
     var openWord=(mk==='bugflow')?'new':'opened';
-    return 'Trend: rising resolved−'+openWord+' balance = Improving (🟢), falling = Degrading (🔴), |slope| ≤ '+thr+' = Stable (🟡).';
+    // [P24-C/E] Net level + balance trend.
+    return 'Trend: net = Σ(resolved − '+openWord+') over the window. Net below −'+band+'% of the total flow (backlog growing) = Degrading (🔴) unless the resolved−'+openWord+' balance is clearly rising; net above +'+band+'% = Improving (🟢) unless the balance is clearly falling; otherwise a rising balance = Improving, falling = Degrading, within ±'+band+'% = Stable (🟡).'+common;
   }
+  var rule=' Change = relative change of the fitted trend line across the window (slope × periods ÷ window mean); within ±'+band+'% = Stable (🟡).';
   if(dir==='up'){
-    return 'Trend: rising = Improving (🟢), falling = Degrading (🔴), |slope| ≤ '+thr+' = Stable (🟡).';
+    return 'Trend: higher is better — rising = Improving (🟢), falling = Degrading (🔴).'+rule+common;
   }
-  return 'Trend: falling = Improving (🟢), rising = Degrading (🔴), |slope| ≤ '+thr+' = Stable (🟡).';
+  return 'Trend: lower is better — falling = Improving (🟢), rising = Degrading (🔴).'+rule+common;
 }
 
 function rcSettingsRender(){
@@ -273,7 +276,11 @@ function rcSettingsRender(){
   // [P0-2] Aggregation is a semantic property of the metric (rcApply pins
   // each metric to its own computation branch) — shown read-only, no select.
   h+='<span class="text-xs text-gray-600" title="Aggregation is a semantic property of the metric definition — not editable.">Aggregation: '+(m.aggregation||'—')+' (fixed)</span>';
-  h+='<label class="text-xs text-gray-600">Threshold '+rcSelCtl('rcSet_'+mk+'_threshold', ['0.01','0.05','0.1','0.2','0.5','1','2','5'], m.threshold)+'</label>';
+  // [P24-C] Stable band of the relative trend rule (% of the window mean).
+  // Backlog Health uses its healthy band instead (no slope verdict).
+  if(m.aggregation!=='coverage'){
+    h+='<label class="text-xs text-gray-600" title="Trend over the window within ± this % of the window mean = Stable">Stable band ±% '+rcSelCtl('rcSet_'+mk+'_stablePct', ['5','10','15','20','25','30'], String(rcStablePct(mk, S)))+'</label>';
+  }
   if(m.defaultN!==undefined){
     h+='<label class="text-xs text-gray-600">Default N '+rcSelCtl('rcSet_'+mk+'_defaultN', ['1','2','3','4','5','6','7','8','9','10'], m.defaultN)+'</label>';
   }
@@ -371,7 +378,7 @@ function rcSettingsRender(){
       +rcSelCtlLabeled('rcSet_vel_mode',
         [['auto',velAutoLbl],['items','Issue Velocity (issue counts)'],['sp','Story Point Velocity (story points)']],
         m.velocityMode||'auto')
-      +'<span class="text-xs text-gray-400 ml-1">auto: SP velocity when the window carries story points, else issue counts.</span></div>';
+      +'<span class="text-xs text-gray-400 ml-1">auto: Story Point Velocity when ≥ 50% of the completed items in the window carry story points, else issue counts.</span></div>';
     if(m.velocityMode==='sp' && !rcWindowHasSP()){
       h+='<div class="mb-2 text-xs text-amber-700">⚠ Forced Story Point Velocity: no story points in the current window — the metric shows N/A (no count fallback).</div>';
     }
@@ -450,8 +457,8 @@ function rcCollectPanel(){
   // rcSetSt_ checkboxes would WIPE the committed sets with empty lists.
   var m={types:checkedVals('rcSetTy_'+mk+'_')};
   // [P0-2] aggregation is a fixed semantic property — not read from the UI.
-  var th=rcVal('rcSet_'+mk+'_threshold');
-  if(th!==undefined&&th!==''){ var f=parseFloat(th); if(!isNaN(f)) m.threshold=f; }
+  var th=rcVal('rcSet_'+mk+'_stablePct');
+  if(th!==undefined&&th!==''){ var f=parseFloat(th); if(!isNaN(f)) m.stablePct=f; }
   var dn=rcVal('rcSet_'+mk+'_defaultN');
   if(dn!==undefined&&dn!==''){ var i2=parseInt(dn,10); if(!isNaN(i2)) m.defaultN=i2; }
   if(mk==='wip'){
