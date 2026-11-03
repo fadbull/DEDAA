@@ -325,7 +325,38 @@ function rcTrendVerdict(vals, dir, stablePct){
   return {ok:true, n:pts.length, change:chg, cls:cls, slope:tr.slope};
 }
 function rcVerdictWord(cls){
-  return cls==='improving' ? '🟢 Improving' : cls==='degrading' ? '🔴 Degrading' : '🟡 Stable';
+  return cls==='improving' ? '🟢 Improving' : cls==='degrading' ? '🔴 Degrading'
+       : cls==='recovering' ? '🟡 Recovering' : cls==='slowing' ? '🟡 Slowing' : '🟡 Stable';
+}
+// [P24-E] Flow / Bug Flow verdict. The net LEVEL over the window sets the
+// colour; the resolved−opened balance trend can only soften it to 🟡, never
+// flip it (a growing backlog is never «Improving», a shrinking one never
+// «Degrading»):
+//   net%   = Σ(resolved − opened) ÷ Σ(resolved + opened) × 100
+//   trend% = balance OLS slope × (n−1) ÷ mean per-series flow per period × 100
+//               | balance rising | flat        | falling
+//   net < −band | 🟡 Recovering  | 🔴 Degrading | 🔴 Degrading
+//   |net| ≤ band| 🟢 Improving   | 🟡 Stable    | 🔴 Degrading
+//   net > +band | 🟢 Improving   | 🟢 Improving | 🟡 Slowing
+function rcFlowVerdict(opened, resolved, stablePct){
+  var n=opened.length;
+  var oSum=opened.reduce(function(a,b){return a+b;},0);
+  var rSum=resolved.reduce(function(a,b){return a+b;},0);
+  var T=oSum+rSum, net=rSum-oSum;
+  if(!T) return {ok:false, reason:'empty', n:n, net:0};
+  var balance=opened.map(function(v,i){ return resolved[i]-v; });
+  var bt=rcLinearTrend(balance, true);
+  if(n<RC_TREND_MIN_POINTS || !bt) return {ok:false, reason:'few', n:n, net:net};
+  var band=(stablePct===undefined||stablePct===null)?10:stablePct;
+  var netPct=net/T*100;
+  var trPct=bt.slope*(n-1)/(T/(2*n))*100;
+  var lvl = netPct>band ? 'pos' : (netPct<-band ? 'neg' : 'bal');
+  var tr  = trPct>band ? 'up' : (trPct<-band ? 'down' : 'flat');
+  var cls;
+  if(lvl==='neg') cls = tr==='up' ? 'recovering' : 'degrading';
+  else if(lvl==='pos') cls = tr==='down' ? 'slowing' : 'improving';
+  else cls = tr==='up' ? 'improving' : (tr==='down' ? 'degrading' : 'stable');
+  return {ok:true, n:n, net:net, netPct:netPct, trPct:trPct, lvl:lvl, tr:tr, cls:cls};
 }
 // "Trend over window" fragment of the conclusion line.
 function rcTrendText(v, nPeriods){

@@ -805,36 +805,25 @@ RENDER_JS = """function rcApply(){
     // [P12-P4] No verdict on an empty selection (settings OR top checkboxes).
     conclEl.textContent='';
   } else if(isFlow){
-    // [P24-C/E] Flow verdict = net LEVEL + balance TREND:
-    //   net%   = Σ(resolved − opened) ÷ Σ(resolved + opened) × 100 over the window;
-    //   trend% = balance slope × (n−1) ÷ mean per-series flow per period × 100.
-    //   net% < −band and the balance is not clearly rising → 🔴 Degrading
-    //   (the backlog grows); net% > band and not clearly falling → 🟢
-    //   Improving; otherwise the balance trend decides (|trend%| ≤ band → 🟡).
-    var oSum=openedVals.reduce(function(a,b){return a+b;},0);
-    var rSum=resolvedVals.reduce(function(a,b){return a+b;},0);
-    var T=oSum+rSum, net=rSum-oSum, nP=openedVals.length;
-    if(!T){
+    // [P24-E] rcFlowVerdict: the net level sets the colour, the balance
+    // trend can only soften it to 🟡 (Recovering / Slowing).
+    var fv=rcFlowVerdict(openedVals, resolvedVals, stablePct);
+    var nP=openedVals.length;
+    if(!fv.ok && fv.reason==='empty'){
       conclEl.textContent='No activity in the window — no trend';
-    } else if(nP<RC_TREND_MIN_POINTS || !balTrend){
+    } else if(!fv.ok){
       conclEl.textContent='Not enough data for a trend ('+nP+' of '+nP+' periods; ≥ '+RC_TREND_MIN_POINTS+' needed)';
     } else {
-      var netPct=net/T*100;
-      var meanFlow=T/(2*nP);
-      var trPct=meanFlow ? balTrend.slope*(nP-1)/meanFlow*100 : 0;
-      var lvl = netPct>stablePct ? 'pos' : (netPct<-stablePct ? 'neg' : 'bal');
-      var tr  = trPct>stablePct ? 'up' : (trPct<-stablePct ? 'down' : 'flat');
-      var cls = (lvl==='neg' && tr!=='up') ? 'degrading'
-              : (lvl==='pos' && tr!=='down') ? 'improving'
-              : (tr==='up' ? 'improving' : (tr==='down' ? 'degrading' : 'stable'));
+      var net=fv.net, lvl=fv.lvl, trPct=fv.trPct;
       trendOk=true;
       var ow=openLabel.toLowerCase();
       var netTxt = 'net '+(net>=0?'+':'−')+Math.abs(net)+' over window ('
         + (lvl==='neg' ? ow+' exceed resolved — backlog growing'
            : lvl==='pos' ? 'resolved exceed '+ow+' — backlog shrinking'
            : 'balanced')+')';
-      var c = rcVerdictWord(cls)+' · '+netTxt
-        +' · balance trend '+(trPct>=0?'+':'−')+Math.abs(trPct).toFixed(0)+'%';
+      var trWord = fv.tr==='up' ? 'improving' : (fv.tr==='down' ? 'worsening' : 'flat');
+      var c = rcVerdictWord(fv.cls)+' · '+netTxt
+        +' · balance trend '+(trPct>=0?'+':'−')+Math.abs(trPct).toFixed(0)+'% ('+trWord+')';
       // [P1-4] Two Δ blocks: one per series (integer counters).
       c += ' · '+openLabel+' '+rcDeltaText(openedVals, 0);
       c += ' · '+resolLabel+' '+rcDeltaText(resolvedVals, 0);

@@ -205,8 +205,8 @@ function rcTrendRule(mk, S){
     // [P19-B1] The bugflow series is new-vs-resolved — the balance word
     // must match the series name ('new'), not 'opened'.
     var openWord=(mk==='bugflow')?'new':'opened';
-    // [P24-C/E] Net level + balance trend.
-    return 'Trend: net = Σ(resolved − '+openWord+') over the window. Net below −'+band+'% of the total flow (backlog growing) = Degrading (🔴) unless the resolved−'+openWord+' balance is clearly rising; net above +'+band+'% = Improving (🟢) unless the balance is clearly falling; otherwise a rising balance = Improving, falling = Degrading, within ±'+band+'% = Stable (🟡).'+common;
+    // [P24-E] The net level sets the colour; the balance trend only softens it.
+    return 'Trend: net = Σ(resolved − '+openWord+') over the window. Net below −'+band+'% of the total flow (backlog growing) = Degrading (🔴), or Recovering (🟡) if the resolved−'+openWord+' balance is clearly rising — never Improving; net above +'+band+'% (backlog shrinking) = Improving (🟢), or Slowing (🟡) if the balance is clearly falling — never Degrading; net within ±'+band+'% → the balance trend decides: rising = Improving, falling = Degrading, within ±'+band+'% = Stable (🟡).'+common;
   }
   var rule=' Change = relative change of the fitted trend line across the window (slope × periods ÷ window mean); within ±'+band+'% = Stable (🟡).';
   if(dir==='up'){
