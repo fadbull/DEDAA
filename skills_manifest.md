@@ -255,8 +255,9 @@ tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
   images), Requirements, Found Artifacts (pure text extraction, source links
   mandatory).
 - **Tab 2 — Metrics & Delivery (PM):** the **Process Metrics — Trends** widget
-  (20 Jira-derived metrics with per-metric settings, healthy reference lines,
-  trend conclusions and Δ% — see below), CFD, Cycle/Lead Time (from changelog),
+  (20 Jira-derived metrics with per-metric settings, metric-specific reference
+  bands where applicable, trend conclusions and Δ% — see below), CFD,
+  Cycle/Lead Time (from changelog),
   Throughput, Velocity, Backlog Health, Scope Change Volume, Bug Growth,
   Defect Age, Quality Debts, Project Jira Reports.
 - **Tab 3 — Jira Data Profile:** Schema & Field Usage, Core Workflows (Mermaid),
@@ -268,18 +269,31 @@ tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
 `lib/dashboard/chart_config.py` (`RC_CFG`), derived per item in
 `lib/dashboard/derive.py` (`rcDeriveAll`), aggregated and rendered in
 `lib/dashboard/chart_render.py` (`rcApply`). Every metric supports the
-Periods selector (Daily / Weekly / Sprint / Monthly / Quarterly / Annual),
-the dimension selector (project / team / component / epic / person /
-issuetype), an Issue Type pool, and two settings levels (Widget settings +
-Metric settings, persisted to `localStorage['dedaa_metric_settings']`).
-Teams and story points are optional: the auto-modes (`denominator:auto`,
-`densityMode:auto`, `velocityMode:auto`) degrade to count-based calculations
-when the data lacks them. Healthy ranges render as static dashed reference
-lines; the trend conclusion prints Improving / Stable / Degrading (or the
-2–3 sprints band verdict for Backlog Health) plus a period-over-period Δ% —
-and never fabricates a verdict on an empty selection or an empty window
-(`RC_WIN_STATE` keeps the chart, tooltip, avg-box, conclusion and settings
-panel describing the same filtered-window state).
+Periods selector (Daily / Weekly / Sprint / Monthly / Quarterly / Annual), the
+dimension selector (project / team / component / epic / person), an Issue Type
+filter, and two settings levels (Widget settings + Metric settings, persisted
+to `localStorage['dedaa_metric_settings']`). The Issue Type filter is not a
+dimension split. By default, every metric uses the same contiguous five-period
+window ending at the project's latest active sprint; when sprint data is
+unavailable, the anchor is the latest active two-week period. The selected
+granularity and calendar range apply consistently across metrics.
+
+Trend-based metrics require at least three periods with data. Their fitted
+trend's relative change across the window is compared with a per-metric stable
+band (default ±10% of the window mean; configurable from ±5% to ±30%).
+Flow and Bug Growth use a separate net-balance rule: the sign of
+Σ(resolved − opened/new) relative to the stable band determines whether the
+backlog grew or shrank; a growing backlog is Degrading (or Recovering if its
+balance trend is improving), while a shrinking backlog is Improving (or
+Slowing if its balance trend is worsening). The balance trend cannot reverse
+the net verdict. A balanced net uses the balance trend: rising = Improving,
+falling = Degrading, and within the stable band = Stable. Backlog Health uses
+its configured healthy coverage band rather than the standard slope verdict.
+Δ compares the last period with the adjacent previous period. Empty selections
+and insufficient data do not produce fabricated trend verdicts (`RC_WIN_STATE`
+keeps the chart, tooltip, avg-box, conclusion and settings panel describing
+the same filtered-window state). The widget displays Jira-derived
+measurements only; it does not establish an as-is assessment or baseline.
 
 ### 3.4 Event-Driven Analytics (Tab 3, section 8)
 
@@ -348,10 +362,12 @@ relationships. Requires `parent_key` in the Jira metadata (populated by
   HNSW folder id, and folder size in MB.
 - **Data completeness:** if data is missing, render "N/A" inside the widget —
   never guess or break the layout.
-- **Configurable granularity:** the Process Metrics — Trends widget defaults to
-  2-week buckets (`2025-W01-02`) but the Periods selector switches to Daily /
-  Weekly / Sprint / Monthly / Quarterly / Annual; tooltips stay
-  granularity-neutral («per selected period»).
+- **Configurable granularity:** the Process Metrics — Trends widget defaults
+  to Sprint periods, anchored on the latest active sprint (or a two-week
+  period when sprint data is unavailable), and shows the latest five periods.
+  The Periods selector switches to Daily / Weekly / Sprint / Monthly /
+  Quarterly / Annual; tooltips stay granularity-neutral («per selected
+  period»).
 - **Configurable status sets:** Cycle Time / Lead Time / QA / review metrics
   read their start/end statuses from the Widget settings status sets (the
   tooltip's dynamic Formula: section always shows the ACTUAL configured
@@ -374,8 +390,8 @@ pivot cube (`Issue Type × Status → count`) saved to CSV. It additionally emit
 - **Always cite sources:** attach the source `url` to every claim.
 - **Respect "N/A":** if a widget shows "N/A", do not fabricate numbers.
 - **Configurable lens:** the Trends widget supports Daily…Annual periods —
-  match the narrative to the selected granularity instead of assuming
-  2-week buckets.
+  match the narrative to the selected granularity instead of assuming a fixed
+  period length.
 - **Actionable, not generic:** tie every recommendation to a specific metric
   and its source.
 

@@ -225,8 +225,17 @@ Issue Lead Time, Throughput, Velocity, Cycle Time, Backlog Health, Design
 Review Turnaround, Bug Growth, Production Leakage, Bug Fixing Allocation,
 Incident Frequency, Time in QA, Defect Density, WIP, Flow Efficiency, Defect
 Escape Rate, Clarification/Review Cycle Count — with configurable periods
-(Daily…Annual), dimensions, Issue Type pools, two settings levels (Widget +
-Metric), healthy reference lines and trend conclusions with Δ%. The **Jira
+(Daily…Annual), dimensions, Issue Type filters, two settings levels (Widget +
+Metric), and trend conclusions with Δ%. By default, all metrics use the same
+five-period window ending at the project's latest active sprint (or a
+two-week period when sprints are unavailable). Trend verdicts require at
+least three periods with data; the configurable stable band defaults to ±10%
+of the window mean. Flow and Bug Growth verdicts compare the net
+resolved-minus-opened balance with that stable band: a growing backlog is
+Degrading (or Recovering if its balance trend is improving), while a shrinking
+backlog is Improving (or Slowing if its balance trend is worsening). The
+balance trend cannot reverse the net verdict. The widget reports Jira-derived measurements only;
+it does not establish an as-is assessment or baseline. The **Jira
 Data Profile** tab includes **Event-Driven Analytics** — bug-creation triggers
 (parent status at bug creation), auto-transit / parent-child sync (automation
 rules vs manual leakage), label/custom-field impact on cycle time and rework,
