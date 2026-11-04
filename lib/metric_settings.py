@@ -100,11 +100,9 @@ DEFAULT_SETTINGS = {
         "fieldName": "",      # source=field: exact field name (e.g. "Team")
         "labels": [],         # source=labels: selected labels = team names
     },
-    # Label (Jira "labels" field, case-insensitive substring match) that marks
-    # a bug as escaped-to-production. DEFAULT resolution: when the setting
-    # keeps the default value, the FIRST project label containing 'prod'
-    # (case-insensitive, e.g. 'Production') is used; an explicit non-default
-    # value always wins.
+    # Label marking a bug as escaped to production. Default 'prod' matches
+    # the prod token, prod_* / prod-* and production, case-insensitively;
+    # an explicit non-default value overrides the widget-level default.
     "prodLabel": "prod",
     # [P3-2] Sprint data availability (widget-level): auto | available | none.
     # auto: detect from the project data (any item carrying a sprint field);

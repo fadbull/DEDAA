@@ -142,22 +142,6 @@ def compute_jira(meta, docs, settings=None):
     _PROD_LABEL = (S.get("prodLabel") or "prod").strip().lower()
     _SEV_MAP = S.get("severityMap") or {}
 
-    def _effective_prod_label():
-        """Effective production label. The DEFAULT 'prod' resolves to the
-        FIRST project label containing 'prod' (case-insensitive, e.g.
-        'Production') so projects that tag production defects differently
-        still match; an explicit non-default setting always wins."""
-        if _PROD_LABEL != "prod":
-            return _PROD_LABEL
-        for _m in meta:
-            for _lb in (_m.get("labels") or "").split(","):
-                _l = _lb.strip().lower()
-                if _l and "prod" in _l:
-                    return _l
-        return _PROD_LABEL
-
-    _PROD_LABEL_EFF = _effective_prod_label()
-
     def cfg_metric(mk):
         return (S.get("metrics") or {}).get(mk) or {}
 
@@ -478,7 +462,7 @@ def compute_jira(meta, docs, settings=None):
         # and understated the leakage). Value = prod-labelled ÷
         # (QA-entered ∪ prod-labelled) × 100, bucketed by CREATED date (cd).
         if is_bug and cd:
-            leaked = 1 if _label_has(labels, _PROD_LABEL_EFF) else 0
+            leaked = 1 if _label_has(labels, _PROD_LABEL) else 0
             _lk_in_qa = False
             for _lk_dt, _lk_st in _status_events_from_text(d):
                 if (_lk_st or "").strip().lower() in QA_ST:
@@ -500,7 +484,7 @@ def compute_jira(meta, docs, settings=None):
         # per time period, by severity. Uses created date (when the incident was
         # opened/found). Severity is derived from priority: Critical/High ->
         # Critical, Major -> Major, Minor/Low/Trivial -> Minor.
-        if is_bug and cd and _label_has(labels, _PROD_LABEL_EFF):
+        if is_bug and cd and _label_has(labels, _PROD_LABEL):
             _pl = prio.lower()
             _sev_map_i = cfg_metric("incident").get("severityMap") or _SEV_MAP
             sev = "Minor"
@@ -597,7 +581,7 @@ def compute_jira(meta, docs, settings=None):
                 # [P6-B5] Prod-labelled defects are excluded from the DD
                 # numerator — they belong to Production Leakage (the two
                 # populations must not overlap).
-                _dd_prod = _label_has(labels, _PROD_LABEL_EFF)
+                _dd_prod = _label_has(labels, _PROD_LABEL)
                 if _dd_in_qa and not _dd_prod:
                     pm_defect_density_items.append(dict(dims, density=1,
                                                         dev_start=cd.isoformat()))

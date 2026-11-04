@@ -367,21 +367,13 @@ function rcVocab(){
   return { statuses:Object.keys(st).sort(), labels:Object.keys(lb).sort(),
            priorities:Object.keys(pr).sort() };
 }
-// Effective production label. The DEFAULT value ('prod') resolves to the
-// FIRST project label containing 'prod' (case-insensitive, e.g.
-// 'Production') so projects that tag production defects differently work
-// out of the box; an explicitly chosen non-default value always wins.
+// The default 'prod' uses rcLabelHas token matching. A non-default metric
+// override wins; otherwise the widget-level setting applies.
 function rcProdLabelEff(val, S){
   S=S||rcDraft||RC_SETTINGS;
-  var def=String((RC_SETTINGS_DEFAULT||{}).prodLabel||'prod');
-  var v=(val!==undefined&&val!==null&&String(val)!=='')
-    ? String(val) : String(S.prodLabel||def);
-  if(v.toLowerCase()!==def.toLowerCase()) return v;   // explicit override
-  var V=rcVocab();
-  for(var i=0;i<V.labels.length;i++){
-    if(String(V.labels[i]).toLowerCase().indexOf('prod')>=0) return V.labels[i];
-  }
-  return v;
+  var metric=(val!==undefined&&val!==null)?String(val).trim():'';
+  return metric && metric.toLowerCase()!=='prod'
+    ? metric : String(S.prodLabel||'prod').trim();
 }
 // Select control: options from the project data; current value is
 // pre-selected (added as an option if missing, e.g. custom imported value).

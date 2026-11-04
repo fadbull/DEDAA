@@ -274,9 +274,13 @@ dimension selector (project / team / component / epic / person), an Issue Type
 filter, and two settings levels (Widget settings + Metric settings, persisted
 to `localStorage['dedaa_metric_settings']`). The Issue Type filter is not a
 dimension split. By default, every metric uses the same contiguous five-period
-window ending at the project's latest active sprint; when sprint data is
-unavailable, the anchor is the latest active two-week period. The selected
-granularity and calendar range apply consistently across metrics.
+window ending at the project's latest active two-week period. The Sprint
+option currently always uses fixed two-week ISO buckets, not actual Jira
+sprint boundaries, even when sprint fields are present. The selected
+granularity and calendar range apply consistently across metrics. Team
+filtering uses the configured field or labels for every metric. The default
+production label `prod` matches production tokens, not unrelated words such
+as `product` or `non-prod`; custom labels remain configurable.
 
 Trend-based metrics require at least three periods with data. Their fitted
 trend's relative change across the window is compared with a per-metric stable
@@ -363,8 +367,8 @@ relationships. Requires `parent_key` in the Jira metadata (populated by
 - **Data completeness:** if data is missing, render "N/A" inside the widget —
   never guess or break the layout.
 - **Configurable granularity:** the Process Metrics — Trends widget defaults
-  to Sprint periods, anchored on the latest active sprint (or a two-week
-  period when sprint data is unavailable), and shows the latest five periods.
+  to fixed two-week periods, anchored on the latest active period, and shows
+  the latest five periods. Actual Jira sprint boundaries are not yet used.
   The Periods selector switches to Daily / Weekly / Sprint / Monthly /
   Quarterly / Annual; tooltips stay granularity-neutral («per selected
   period»).

@@ -119,7 +119,8 @@ function rcDeriveAll(){
     var ip=firstEv(ev,DEV), dn=firstEv(ev,DONE);
     function item(devDate, extra){
       var it={key:r.key, project:r.project, team:r.team, epic:r.epic,
-              person:r.person, type:r.type, dev_start:iso(devDate)};
+              person:r.person, type:r.type, labels:r.labels,
+              fieldvals:r.fieldvals, dev_start:iso(devDate)};
       if(extra) Object.keys(extra).forEach(function(k){ it[k]=extra[k]; });
       return it;
     }
@@ -408,14 +409,10 @@ function rcDeriveAll(){
     if(dn){
       var ts=(r.timeSpent!==undefined&&r.timeSpent!==null)?r.timeSpent:0;
       if(!!mtypes('bugfix')[lbl]){
-        out.bugfix.push({key:r.key, project:r.project, team:r.team,
-          epic:r.epic, person:r.person, type:r.type, role:'numerator',
-          timeSpent:ts, dev_start:iso(new Date(dn))});
+        out.bugfix.push(item(dn,{role:'numerator', timeSpent:ts}));
       }
       if(r.type!=='Sub-task'&&r.type!=='Test'){
-        out.bugfix.push({key:r.key, project:r.project, team:r.team,
-          epic:r.epic, person:r.person, type:r.type, role:'denominator',
-          timeSpent:ts, dev_start:iso(new Date(dn))});
+        out.bugfix.push(item(dn,{role:'denominator', timeSpent:ts}));
       }
     }
     // [FIX-A1] Defect Density: role-based items —
@@ -443,14 +440,12 @@ function rcDeriveAll(){
         // overlap: DD = found in QA, Leakage = leaked to prod).
         var ddProd=rcLabelHas(r.labels,
           rcProdLabelEff(String(mcfg('leakage').prodLabel||PROD), S).toLowerCase());
-        if(cd&&ddInQA&&!ddProd) out.defectdensity.push({key:r.key, project:r.project, team:r.team,
-          epic:r.epic, person:r.person, type:r.type,
-          role:'numerator', sp:(r.sp!==undefined&&r.sp!==null)?r.sp:0,
-          dev_start:iso(cd)});
+        if(cd&&ddInQA&&!ddProd) out.defectdensity.push(item(cd,{
+          role:'numerator', sp:(r.sp!==undefined&&r.sp!==null)?r.sp:0
+        }));
       } else if(dn){
-        out.defectdensity.push({key:r.key, project:r.project, team:r.team,
-          epic:r.epic, person:r.person, type:r.type, role:'denominator',
-          sp:(r.sp!==undefined&&r.sp!==null)?r.sp:0, dev_start:iso(new Date(dn))});
+        out.defectdensity.push(item(dn,{role:'denominator',
+          sp:(r.sp!==undefined&&r.sp!==null)?r.sp:0}));
       }
     }
     // [CFD] Cumulative Flow Diagram: one record per issue carrying the FULL
@@ -462,11 +457,7 @@ function rcDeriveAll(){
     if(cd){
       var cfdEv=[[cd.getTime(),'__created__']];
       for(var ci=0;ci<ev.length;ci++) cfdEv.push([ev[ci][0].getTime(), String(ev[ci][1]||'')]);
-      out.cfd.push(item(cd,{
-        events:cfdEv,
-        labels:r.labels,        // [FIX-P1-2]
-        fieldvals:r.fieldvals   // [FIX-P1-2]
-      }));
+      out.cfd.push(item(cd,{events:cfdEv}));
     }
   });
   return out;

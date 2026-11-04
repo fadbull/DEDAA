@@ -52,6 +52,7 @@ DEDAA/
 │   ├── chromadb_utils.py      #   ChromaDB loading / collection resolution
 │   ├── date_utils.py          #   Date parsing, bucketing, status grouping
 │   ├── compute_jira.py        #   PM metrics from Jira issues (Skill #2)
+│   ├── metric_settings.py     #   Metric settings schema + validation
 │   ├── compute_product.py     #   compute_product(), compute_reports()
 │   ├── compute_artifacts.py   #   Confluence text scanning (Skill #2)
 │   ├── compute_profile.py     #   Jira data profile (field density, workflows)
@@ -74,11 +75,11 @@ DEDAA/
 │       ├── chart_render.py    #     rcApply() — aggregation, state, rendering
 │       ├── derive.py          #     rcDeriveAll() — per-metric item derivation
 │       ├── granularity.py     #     buckets, dims, rcItemTeams
-│       ├── metric_settings.py #     RC_SETTINGS_DEFAULT schema + validation
 │       ├── settings_metric.py #     Metric settings panel + rcTipFor/rcFormulaText
 │       ├── settings_widget.py #     Widget settings panel
 │       ├── cfd_widget.py      #     Cumulative Flow Diagram widget
 │       └── shell.py           #     HTML shell, tabs, CSS
+├── tests/                     # Portable Jira Trends regression tests
 └── vector_dbs/                # One folder PER project (git-ignored, never committed)
     └── <project-folder>/      #   created per project key / alias — ALL of the
         ├── chroma.sqlite3     #   project's data lives here (see § Per-project
@@ -87,8 +88,8 @@ DEDAA/
 ```
 
 > Both agents are **thin CLI entry points**; all logic lives in the `lib/`
-> sub-package (compute_*, dashboard/, sync_* modules). The refactor plans and
-> the QA harnesses live in the repository-level `plans/` folder.
+> sub-package (compute_*, dashboard/, sync_* modules). Portable regression
+> tests live in `tests/` and use synthetic Jira records.
 >
 > **Per-project isolation:** every project (alias / key) gets its own folder
 > `./vector_dbs/<alias|project-key>/`. The ChromaDB, the generated dashboard
@@ -227,8 +228,13 @@ Incident Frequency, Time in QA, Defect Density, WIP, Flow Efficiency, Defect
 Escape Rate, Clarification/Review Cycle Count — with configurable periods
 (Daily…Annual), dimensions, Issue Type filters, two settings levels (Widget +
 Metric), and trend conclusions with Δ%. By default, all metrics use the same
-five-period window ending at the project's latest active sprint (or a
-two-week period when sprints are unavailable). Trend verdicts require at
+five-period window ending at the project's latest active two-week period.
+The current Sprint option always uses fixed two-week ISO buckets; it does not
+yet use actual Jira sprint boundaries, even when sprint fields are present.
+Team filters resolve the configured field or labels for all metric records.
+The default production label `prod` matches production tokens such as `prod`,
+`production`, and `prod_bug`, but not `product` or `non-prod`; an explicit
+custom label remains supported. Trend verdicts require at
 least three periods with data; the configurable stable band defaults to ±10%
 of the window mean. Flow and Bug Growth verdicts compare the net
 resolved-minus-opened balance with that stable band: a growing backlog is
@@ -284,6 +290,19 @@ python analyze_agent.py --help
 | `--skip-olap` | Skip OLAP analysis (dashboard only) | off |
 | `--skip-dashboard` | Skip dashboard generation (OLAP only) | off |
 | `--dry-run` | Print only, do not write | off |
+
+### Regression tests
+
+From the project root, run the portable tests with Python 3 and Node.js 18 or
+newer; they use only standard libraries and do not require Jira data:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+node --test tests/test_trends_regressions.js
+```
+
+The Node.js test loads the embedded JavaScript through `python3`. Set `PYTHON`
+to a Python executable if it is not available under that name.
 
 ---
 
