@@ -1,5 +1,5 @@
 """Date / status helpers shared across the compute modules."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Status groupings (must match sync_agent.py).
 CLOSED = {"closed", "done", "resolved", "complete", "completed", "cancelled",
@@ -65,3 +65,36 @@ def _status_events_from_text(doc_text):
             ev.append((dt, to))
     ev.sort(key=lambda x: x[0])
     return ev
+
+
+def _status_transitions_from_text(doc_text):
+    """Parse observed status transitions, normalized to UTC."""
+    events = []
+    if not doc_text or "Status history:" not in doc_text:
+        return events
+    for line in doc_text.split("Status history:", 1)[1].splitlines():
+        timestamp, separator, change = line.strip().partition(": ")
+        if not separator or "->" not in change:
+            continue
+        before, after = (part.strip() for part in change.split("->", 1))
+        dt = _utc_instant(timestamp)
+        if not dt or not before or not after or before == "None" or after == "None":
+            continue
+        events.append((dt, before, after))
+    return sorted(events, key=lambda event: event[0])
+
+
+def _utc_datetime(value):
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def _utc_instant(value):
+    if not value or len(str(value)) < 16 or str(value)[10] not in ("T", " "):
+        return None
+    return _utc_datetime(value)

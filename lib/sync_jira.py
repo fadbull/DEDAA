@@ -152,8 +152,9 @@ def sync_jira(api, project_key, jql, field_names, url_base, days, *, sprint_fiel
 
     docs = []
     for iss in issues:
-        ts = extract_status_timestamps(
-            (iss.get("changelog") or {}).get("histories", []))
+        changelog = iss.get("changelog") or {}
+        histories = changelog.get("histories") or []
+        ts = extract_status_timestamps(histories)
         parent_key = None
         parent = iss["fields"].get("parent")
         if isinstance(parent, dict):
@@ -193,6 +194,18 @@ def sync_jira(api, project_key, jql, field_names, url_base, days, *, sprint_fiel
             "in_progress_date": ts["in_progress"],
             "done_date": ts["done"],
             "parent_key": parent_key,
+            "status_history_complete": (
+                isinstance(changelog.get("total"), int)
+                and changelog.get("startAt", 0) == 0
+                and changelog["total"] == len(histories)
+            ),
+            "subtask_keys_json": json.dumps([
+                child["key"] for child in iss["fields"]["subtasks"]
+                if isinstance(child, dict) and child.get("key")
+            ]) if isinstance(iss["fields"].get("subtasks"), list) and all(
+                isinstance(child, dict) and child.get("key")
+                for child in iss["fields"]["subtasks"]
+            ) else None,
             # Epic linkage: Jira stores the epic key in customfield_14500
             # ("Epic Link"). Fall back to parent_key if the custom field is
             # absent (e.g. subtasks linked via the parent field).

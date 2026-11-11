@@ -1,8 +1,8 @@
 """Tab 3 Jira Data Profile computation (field density, workflow)."""
 from collections import Counter, defaultdict
-from datetime import datetime
 import json
-from .date_utils import _dt, _biweek, status_group
+from .date_utils import (_dt, _biweek, status_group, _status_transitions_from_text,
+                         _utc_datetime, _utc_instant)
 
 # ---------------------------------------------------------------------------
 # Tab 3 — Jira Data Profile (Data & Workflow Architecture)
@@ -141,41 +141,33 @@ def compute_jira_profile(meta, docs):
 
     # 8) Time-in-Status: exact days each issue spent in each status, from the
     #    status-history timestamps. -> list of (key, type, status, days).
-    def _status_events(doc_text):
-        """Return sorted [(datetime, to_status)] from Status history."""
-        ev = []
-        if not doc_text or "Status history:" not in doc_text:
-            return ev
-        sec = doc_text.split("Status history:", 1)[1]
-        for line in sec.splitlines():
-            line = line.strip()
-            if "->" not in line:
-                continue
-            ts_str, _, frto = line.partition(": ")
-            dt = _dt(ts_str)
-            if dt and "->" in frto:
-                to = [x.strip() for x in frto.split("->")][1]
-                ev.append((dt, to))
-        ev.sort(key=lambda x: x[0])
-        return ev
-
     time_in_status = []   # (key, type, status, days)
     transition_freq = Counter()  # (from,to) -> count
+    returns = Counter()
     for m, doc in zip(meta, docs):
         typ = m.get("type", "?")
-        ev = _status_events(doc)
-        end_dt = _dt(m.get("updated")) or _dt(m.get("done_date")) or \
-            _dt(m.get("created"))
-        for i, (dt, st) in enumerate(ev):
-            nxt = ev[i + 1][0] if i + 1 < len(ev) else end_dt
-            if nxt and nxt > dt:
-                days = round((nxt - dt).total_seconds() / 86400.0, 2)
+        ev = _status_transitions_from_text(doc)
+        created = _utc_instant(m.get("created"))
+        if ev and m.get("status_history_complete") == True and created and created < ev[0][0]:
+            time_in_status.append({
+                "key": m.get("issue_key"), "type": typ, "status": ev[0][1],
+                "days": (ev[0][0] - created).total_seconds() / 86400,
+            })
+        for i, (dt, before, st) in enumerate(ev):
+            transition_freq[(before, st)] += 1
+            if i + 1 < len(ev):
+                nxt, next_before, next_after = ev[i + 1]
+                if st == next_before and before == next_after and before != st:
+                    returns[(before, st)] += 1
+            else:
+                nxt = _utc_instant(m.get("jira_snapshot_at")) if m.get("status_history_complete") == True else None
+                next_before = m.get("status")
+            if nxt and nxt > dt and st == next_before:
+                days = (nxt - dt).total_seconds() / 86400
                 time_in_status.append({
                     "key": m.get("issue_key"), "type": typ,
                     "status": st, "days": days,
                 })
-            if i + 1 < len(ev):
-                transition_freq[(st, ev[i + 1][1])] += 1
 
     # Aggregate median time-in-status per (status, type).
     from statistics import median
@@ -183,7 +175,7 @@ def compute_jira_profile(meta, docs):
     for t in time_in_status:
         tis_agg[(t["status"], t["type"])].append(t["days"])
     time_in_status_median = {
-        f"{st}__{typ}": round(median(v), 1)
+        f"{st}__{typ}": round(median(v), 2)
         for (st, typ), v in tis_agg.items()}
 
     # 9) OLAP slice data: (type, assignee) -> (count, avg lifecycle days).
@@ -248,13 +240,13 @@ def compute_jira_profile(meta, docs):
         trans_matrix[trans_index[fr]][trans_index[to]] = c
     pingpong = []
     seen = set()
-    for (fr, to), c in transition_freq.items():
-        rev = transition_freq.get((to, fr), 0)
+    for (fr, to), c in returns.items():
+        rev = returns.get((to, fr), 0)
         pair = tuple(sorted((fr, to)))
-        if rev > 0 and fr != to and pair not in seen:
+        if pair not in seen:
             seen.add(pair)
-            pingpong.append({"a": fr, "b": to, "ab": c, "ba": rev,
-                             "total": c + rev})
+            pingpong.append({"a": fr, "b": to, "ab": c + rev, "ba": c + rev,
+                             "total": 2 * (c + rev)})
     pingpong.sort(key=lambda x: -x["total"])
 
     # 13) Time-in-Status per issue type (median days per status), flagging
@@ -276,20 +268,20 @@ def compute_jira_profile(meta, docs):
     olap_dims = ["type", "assignee", "priority", "status", "component"]
     olap_rows = []
     for m in meta:
-        comp = ""
-        if m.get("components"):
-            comp = m["components"].split(",")[0].strip()
+        components = list(dict.fromkeys(
+            c.strip() for c in (m.get("components") or "").split(",") if c.strip()
+        )) or ["None"]
         life = None
-        cd = _dt(m.get("created", ""))
-        dnd = _dt(m.get("done_date", "")) or _dt(m.get("resolutiondate", ""))
+        cd = _utc_datetime(m.get("created"))
+        dnd = _utc_datetime(m.get("resolutiondate"))
         if cd and dnd and dnd >= cd:
-            life = (dnd - cd).days
+            life = round((dnd - cd).total_seconds() / 86400, 2)
         olap_rows.append({
             "type": m.get("type", "?"),
             "assignee": m.get("assignee") or "Unassigned",
             "priority": m.get("priority") or "None",
             "status": m.get("status") or "None",
-            "component": comp or "None",
+            "components": components,
             "life": life,
         })
 
@@ -386,13 +378,31 @@ def compute_jira_profile(meta, docs):
     # (b) Backlog Stagnation — issues in Open status older than 180 days,
     #     broken down per issue type.
     stagnation = Counter()   # type -> count of stagnant Open issues
-    now = datetime.now()
-    for m in meta:
+    stagnation_unknown = 0
+    stagnation_observed = 0
+    for m, doc in zip(meta, docs):
         st = (m.get("status") or "").strip().lower()
         if st not in ("open", "new"):
             continue
-        cd = _dt(m.get("created"))
-        if cd and (now - cd).days > 180:
+        snapshot = _utc_instant(m.get("jira_snapshot_at"))
+        ev = _status_transitions_from_text(doc)
+        if not snapshot or m.get("status_history_complete") != True:
+            stagnation_unknown += 1
+            continue
+        if ev and (ev[-1][2].strip().lower() != st or
+                   any(a[2] != b[1] for a, b in zip(ev, ev[1:]))):
+            stagnation_unknown += 1
+            continue
+        entered = next((dt for dt, before, after in reversed(ev)
+                        if before.strip().lower() not in ("open", "new")
+                        and after.strip().lower() in ("open", "new")), None)
+        if entered is None and (not ev or ev[0][1].strip().lower() in ("open", "new")):
+            entered = _utc_instant(m.get("created"))
+        if not entered or entered > snapshot:
+            stagnation_unknown += 1
+            continue
+        stagnation_observed += 1
+        if (snapshot - entered).total_seconds() > 180 * 86400:
             stagnation[m.get("type", "?")] += 1
     stagnation_total = sum(stagnation.values())
     stagnation_by_type = [{"type": t, "count": c}
@@ -430,8 +440,9 @@ def compute_jira_profile(meta, docs):
         "sdlc_types": sdlc_types,
         "vsm_findings": vsm_findings,
         "subbug_story_ratio": ratio,
-        "backlog_stagnation": {"total": stagnation_total,
-                               "by_type": stagnation_by_type},
+        "backlog_stagnation": {"total": stagnation_total if stagnation_observed else None,
+                               "by_type": stagnation_by_type,
+                               "unknown": stagnation_unknown},
         "security_in_progress": {"count": sec_in_progress, "total": n_sec,
                                  "pct": sec_pct},
         "type_counts": dict(type_counts),

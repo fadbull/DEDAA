@@ -322,39 +322,33 @@ Optional `DEDAA_DASHBOARDS` inputs execute regenerated local HTML and verify
 its period source, shared metric axes and independent Velocity accounting;
 the private dashboards are never required in a clean clone.
 
+**Jira Data Profile:** transition counts use observed `from → to` changes;
+ping-pong requires consecutive return transitions on the same issue.
+Time-in-status uses intervals with known boundaries, while open intervals
+and backlog age require a trustworthy Jira snapshot time. The co-fill
+denominator is all issues. The issue and link OLAP tables paginate all
+matching slices; each issue can appear in multiple component slices, but the
+overall issue count is unique. Lifecycle uses resolution date minus creation
+date, and the links cube counts directed records rather than unique links.
+
 ### 3.4 Event-Driven Analytics (Tab 3, section 8)
 
-Advanced event/trigger analysis computed from the Jira changelog + parent-child
-relationships. Requires `parent_key` in the Jira metadata (populated by
-`sync_agent.py`). If no parent data is present, the affected widgets render
-"N/A" gracefully.
+Event analytics uses Jira parent fields and observed changelogs. Sub-Bugs use
+their parent; a Bug without a parent is associated with a Story/Task only if
+exactly one qualifying linked issue is found. Such a link is not proof of
+causation. Parent status at defect creation is **Unknown** if the history is
+not known to be complete; it is never assumed to be Open. Unknown statuses do
+not by themselves confirm or reject the Sub-Bug status hypothesis.
 
-- **Module 1 — Jira Defect Causality & SDLC Triggers** (three sub-widgets).
-  The parent ("Target Scope") of every defect is resolved by **hard linkage**:
-  - **Sub-Bug** → uses the system `parent` field (its Bug/Story/Task).
-  - **Bug** → if `parent` is empty, scans `issuelinks` for a linked Story/Task
-    (`is blocked by` / `relates to` / `associated` / `depends`); the first such
-    Story/Task becomes the parent feature.
-  - **(a) Story Status at Defect Birth (Doughnut):** for each Bug/Sub-Bug, the
-    parent's status at the exact second the defect was created (from the
-    parent's changelog, defaulting to `Open`). Answers "in which phases do our
-    stories generate bugs?".
-  - **(b) Sub-task Closure Automation Tracker (Callout cards + Mermaid flow):**
-    for each Story/Task with Sub-task children, `T_last_child = max(updated)`
-    among children in `Closed`/`Resolved`; if the parent's status changed within
-    **≤600 s (10 min)** it is an **automation trigger**, otherwise **Manual
-    Stagnation** (broken automation). Shows `X% auto / Y% stuck`.
-  - **(c) Sub-Bug Creation Constraints Validation (Data grid):** for each
-    `[Story/Task/Bug → Sub-Bug]` pair, captures the parent's status at the
-    Sub-Bug's creation second and tests the hypothesis that Sub-Bugs are created
-    only while the parent is `In Testing` (100%). Rejects the hypothesis with
-    the real status distribution if not 100%.
-- **Module 2 — Auto-transit / Parent-Child sync (Stacked bar + Mermaid flow):**
-  groups Sub-tasks by parent; for each parent finds the last closed child's
-  timestamp, then measures how long the parent takes to change status afterward.
-  A transition within **≤300 s (5 min)** is an **Automation Rule (auto)**;
-  otherwise it is **Manual Leakage (manual)**. Renders a target-status flow graph
-  with the auto/manual split on each edge.
+Parent-child closure tracking requires the complete child key list, complete
+status histories and a common trustworthy `jira_snapshot_at` for parent and
+children. It uses actual transitions into closed status and ends latency at
+that snapshot. The current synchronizer records child keys and changelog
+completeness when Jira supplies them, but does not establish a common project
+snapshot; existing caches also lack these guarantees. Consequently this
+tracker is N/A for such data, not a count of zero stalled parents. Timing alone
+cannot prove automation versus manual action.
+
 - **Module 3 — Metadata impact (Bubble chart):** splits issues into cohorts by
   label (labels appearing in ≥3 issues only), computing each cohort's **median
   cycle time** and **ping-pong (rework) rate** versus the project baseline.
@@ -364,15 +358,14 @@ relationships. Requires `parent_key` in the Jira metadata (populated by
   Mermaid network):** classifies every `issuelinks` record across ALL issues
   (horizontal links, not just the vertical parent/child hierarchy) into 4
   macro-categories of SDLC waste:
-  - **A · Hard Blockers** (`blocks`, `is blocked by`, `Depend`) — computes
-    **blocker reaction time** (blocker created → blocked issue In Progress) and
-    the **stagnation rate** for targets that stayed in backlog **>24 working
-    hours**.
-  - **B · Process Rework** (`causes`, `is caused by`) — counts **escaped
-    defects** (a cause created *after* its source issue was closed).
-  - **C · Scope Duplication** (`duplicates`, `clones`, `Cloners`) — computes
-    **Waste Scope** = sunk hours/days spent In Progress on issues later closed
-    with resolution `Duplicate`/`Won't Fix`.
+  - **A · Hard Blockers** — timing and stagnation are N/A without unblock
+    event history; link creation or issue update is not an unblock timestamp.
+  - **B · Process Rework** — counts unique eligible directed `causes` links
+    where a Bug/Sub-Bug was created after the source issue's resolution date.
+    Missing direction, labels, dates or issue data are excluded.
+  - **C · Scope Duplication** — reports elapsed calendar days between recorded
+    In Progress and Done for issues resolved `Duplicate`; this is not work
+    logged or effort, and `Won't Fix` is not a duplicate.
   - **D · Soft Associations** (`relates to`, `Related To`, `Part of`) — builds a
     **closure sync matrix** (ratio of linked pairs closed within the same
     month).
@@ -389,12 +382,12 @@ relationships. Requires `parent_key` in the Jira metadata (populated by
   HNSW folder id, and folder size in MB.
 - **Data completeness:** if data is missing, render "N/A" inside the widget —
   never guess or break the layout.
-- **Configurable granularity:** the Process Metrics — Trends widget defaults
-  to fixed two-week periods, anchored on the latest active period, and shows
-  the latest five periods. Actual Jira sprint boundaries are not yet used.
-  The Periods selector switches to Daily / Weekly / Sprint / Monthly /
-  Quarterly / Annual; tooltips stay granularity-neutral («per selected
-  period»).
+- **Configurable granularity:** the Process Metrics — Trends widget supports
+  Daily / Weekly / Sprint / Monthly / Quarterly / Annual. Sprint Auto uses
+  actual Jira sprint boundaries when more than half of project issues have a
+  populated Sprint field; otherwise it uses two-week calendar periods. The
+  default window contains the latest five eligible active periods; widget and
+  metric settings can override the source and window.
 - **Configurable status sets:** Cycle Time / Lead Time / QA / review metrics
   read their start/end statuses from the Widget settings status sets (the
   tooltip's dynamic Formula: section always shows the ACTUAL configured

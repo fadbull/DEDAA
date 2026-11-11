@@ -71,9 +71,25 @@ new Chart(document.getElementById('bugPrioChart'), { type:'doughnut', data:{
 """ + cl_dist_js + """
 // ---- Tab 3: OLAP Slice & Dice constructor ----
 var OLAP_ROWS = """ + olap_rows_json + """;
+var OLAP_PAGE_SIZE = 200, olapPageIndex = 0, olapLinkPageIndex = 0;
+function olapEscape(value){
+  return String(value).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c];
+  });
+}
+function olapSetPagination(prefix, page, total){
+  var start = total ? page * OLAP_PAGE_SIZE + 1 : 0;
+  var end = Math.min((page + 1) * OLAP_PAGE_SIZE, total);
+  document.getElementById(prefix + 'Prev').disabled = page === 0;
+  document.getElementById(prefix + 'Next').disabled = end >= total;
+  return ' · showing ' + start + '–' + end + ' of ' + total + ' slices';
+}
 function olapDistinct(rows, dim){
-  var seen = {}; var out = [];
-  rows.forEach(function(r){ var v = r[dim]||''; if(!seen[v]){ seen[v]=1; out.push(v); } });
+  var seen = new Set(); var out = [];
+  rows.forEach(function(r){
+    var values = dim === 'component' ? r.components : [r[dim]];
+    values.forEach(function(v){ if(v && !seen.has(v)){ seen.add(v); out.push(v); } });
+  });
   return out.sort();
 }
 function olapFillSelect(id, dim){
@@ -86,7 +102,8 @@ function olapFillSelect(id, dim){
     sel.appendChild(o);
   });
 }
-function olapApply(){
+function olapApply(keepPage){
+  if(keepPage !== true) olapPageIndex = 0;
   var f = {};
   f.type = document.getElementById('olapType').value;
   f.assignee = document.getElementById('olapAssignee').value;
@@ -99,34 +116,39 @@ function olapApply(){
            (!f.assignee || r.assignee === f.assignee) &&
            (!f.priority || r.priority === f.priority) &&
            (!f.status || r.status === f.status) &&
-           (!f.component || r.component === f.component);
+           (!f.component || r.components.indexOf(f.component) !== -1);
   });
   // aggregate by (type, assignee, priority, status, component)
-  var agg = {};
+  var agg = Object.create(null);
   filtered.forEach(function(r){
-    var key = [r.type, r.assignee, r.priority, r.status, r.component].join('|');
-    if(!agg[key]){ agg[key] = {type:r.type, assignee:r.assignee, priority:r.priority,
-      status:r.status, component:r.component, count:0, lifeSum:0, lifeN:0}; }
-    agg[key].count++;
-    if(r.life !== null && r.life !== undefined){ agg[key].lifeSum += r.life; agg[key].lifeN++; }
+    r.components.filter(function(c){ return !f.component || c === f.component; }).forEach(function(component){
+      var key = JSON.stringify([r.type, r.assignee, r.priority, r.status, component]);
+      if(!agg[key]){ agg[key] = {type:r.type, assignee:r.assignee, priority:r.priority,
+        status:r.status, component:component, count:0, lifeSum:0, lifeN:0}; }
+      agg[key].count++;
+      if(r.life !== null && r.life !== undefined){ agg[key].lifeSum += r.life; agg[key].lifeN++; }
+    });
   });
   var rows = Object.keys(agg).map(function(k){ return agg[k]; });
-  rows.sort(function(a,b){ return b.count - a.count; });
+  rows.sort(function(a,b){ return b.count - a.count || JSON.stringify(a).localeCompare(JSON.stringify(b)); });
+  olapPageIndex = Math.min(olapPageIndex, Math.max(0, Math.ceil(rows.length / OLAP_PAGE_SIZE) - 1));
   var body = document.getElementById('olapBody');
   if(!rows.length){
     body.innerHTML = '<tr><td colspan="7" class="py-4 text-gray-400">N/A — no issues match the selected slice</td></tr>';
   } else {
-    body.innerHTML = rows.slice(0, 200).map(function(r){
+    body.innerHTML = rows.slice(olapPageIndex * OLAP_PAGE_SIZE, (olapPageIndex + 1) * OLAP_PAGE_SIZE).map(function(r){
       var avg = r.lifeN ? (r.lifeSum/r.lifeN).toFixed(1) : 'N/A';
-      return "<tr><td class='py-1'>"+r.type+"</td><td class='py-1'>"+r.assignee+
-        "</td><td class='py-1'>"+r.priority+"</td><td class='py-1'>"+r.status+
-        "</td><td class='py-1'>"+r.component+"</td><td class='py-1 font-medium'>"+r.count+
+      return "<tr><td class='py-1'>"+olapEscape(r.type)+"</td><td class='py-1'>"+olapEscape(r.assignee)+
+        "</td><td class='py-1'>"+olapEscape(r.priority)+"</td><td class='py-1'>"+olapEscape(r.status)+
+        "</td><td class='py-1'>"+olapEscape(r.component)+"</td><td class='py-1 font-medium'>"+r.count+
         "</td><td class='py-1'>"+avg+"</td></tr>";
     }).join('');
   }
   document.getElementById('olapSummary').textContent =
-    rows.length + " slice(s) · " + filtered.length + " issue(s) match the current filter";
+    rows.length + " slice(s) · " + filtered.length + " unique issue(s) match the current filter" +
+    olapSetPagination('olap', olapPageIndex, rows.length);
 }
+function olapPage(delta){ olapPageIndex += delta; olapApply(true); }
 // populate dimension dropdowns + first render
 olapFillSelect('olapType', 'type');
 olapFillSelect('olapAssignee', 'assignee');
@@ -138,8 +160,8 @@ olapApply();
 // ---- Tab 3: Issue-Links OLAP Slice & Dice constructor ----
 var OLAP_LINK_ROWS = """ + olap_link_rows_json + """;
 function olapLinkDistinct(dim){
-  var seen = {}; var out = [];
-  OLAP_LINK_ROWS.forEach(function(r){ var v = r[dim]||''; if(!seen[v]){ seen[v]=1; out.push(v); } });
+  var seen = new Set(); var out = [];
+  OLAP_LINK_ROWS.forEach(function(r){ var v = r[dim]||''; if(v && !seen.has(v)){ seen.add(v); out.push(v); } });
   return out.sort();
 }
 function olapLinkFillSelect(id, dim){
@@ -152,7 +174,8 @@ function olapLinkFillSelect(id, dim){
     sel.appendChild(o);
   });
 }
-function olapLinkApply(){
+function olapLinkApply(keepPage){
+  if(keepPage !== true) olapLinkPageIndex = 0;
   var f = {};
   f.link_type = document.getElementById('olapLinkType').value;
   f.direction = document.getElementById('olapLinkDir').value;
@@ -170,31 +193,34 @@ function olapLinkApply(){
            (!f.target_status || r.target_status === f.target_status);
   });
   // aggregate by (link_type, direction, source_type, target_type, source_status, target_status)
-  var agg = {};
+  var agg = Object.create(null);
   filtered.forEach(function(r){
-    var key = [r.link_type, r.direction, r.source_type, r.target_type, r.source_status, r.target_status].join('|');
+    var key = JSON.stringify([r.link_type, r.direction, r.source_type, r.target_type, r.source_status, r.target_status]);
     if(!agg[key]){ agg[key] = {link_type:r.link_type, direction:r.direction,
       source_type:r.source_type, target_type:r.target_type, source_status:r.source_status,
       target_status:r.target_status, count:0}; }
     agg[key].count++;
   });
   var rows = Object.keys(agg).map(function(k){ return agg[k]; });
-  rows.sort(function(a,b){ return b.count - a.count; });
+  rows.sort(function(a,b){ return b.count - a.count || JSON.stringify(a).localeCompare(JSON.stringify(b)); });
+  olapLinkPageIndex = Math.min(olapLinkPageIndex, Math.max(0, Math.ceil(rows.length / OLAP_PAGE_SIZE) - 1));
   var body = document.getElementById('olapLinkBody');
   if(!rows.length){
     body.innerHTML = '<tr><td colspan="7" class="py-4 text-gray-400">N/A — no links match the selected slice</td></tr>';
   } else {
-    body.innerHTML = rows.slice(0, 200).map(function(r){
-      return "<tr><td class='py-1'>"+r.link_type+"</td><td class='py-1'>"+r.direction+
-        "</td><td class='py-1'>"+r.source_type+
-        "</td><td class='py-1'>"+r.target_type+"</td><td class='py-1'>"+r.source_status+
-        "</td><td class='py-1'>"+r.target_status+"</td><td class='py-1 font-medium'>"+r.count+
+    body.innerHTML = rows.slice(olapLinkPageIndex * OLAP_PAGE_SIZE, (olapLinkPageIndex + 1) * OLAP_PAGE_SIZE).map(function(r){
+      return "<tr><td class='py-1'>"+olapEscape(r.link_type)+"</td><td class='py-1'>"+olapEscape(r.direction)+
+        "</td><td class='py-1'>"+olapEscape(r.source_type)+
+        "</td><td class='py-1'>"+olapEscape(r.target_type)+"</td><td class='py-1'>"+olapEscape(r.source_status)+
+        "</td><td class='py-1'>"+olapEscape(r.target_status)+"</td><td class='py-1 font-medium'>"+r.count+
         "</td></tr>";
     }).join('');
   }
   document.getElementById('olapLinkSummary').textContent =
-    rows.length + " slice(s) · " + filtered.length + " link(s) match the current filter";
+    rows.length + " slice(s) · " + filtered.length + " link record(s) match the current filter" +
+    olapSetPagination('olapLink', olapLinkPageIndex, rows.length);
 }
+function olapLinkPage(delta){ olapLinkPageIndex += delta; olapLinkApply(true); }
 // ---- Process Metrics - Trends interactive charts (data-driven) ----
 var PM_DATA = {
 """)

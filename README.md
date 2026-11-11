@@ -260,14 +260,19 @@ resolved-minus-opened balance with that stable band: a growing backlog is
 Degrading (or Recovering if its balance trend is improving), while a shrinking
 backlog is Improving (or Slowing if its balance trend is worsening). The
 balance trend cannot reverse the net verdict. The widget reports Jira-derived measurements only;
-it does not establish an as-is assessment or baseline. The **Jira
-Data Profile** tab includes **Event-Driven Analytics** — bug-creation triggers
-(parent status at bug creation), auto-transit / parent-child sync (automation
-rules vs manual leakage), label/custom-field impact on cycle time and rework,
-and a **Jira Cross-Linkage & SDLC Waste Dashboard** that classifies every
-`issuelinks` record into 4 macro-categories (A Hard Blockers, B Process
-Rework, C Scope Duplication, D Soft Associations) with per-category waste
-metrics, an interdependence network, and a terminal summary table. The OLAP
+it does not establish an as-is assessment or baseline. The **Jira Data Profile**
+tab counts observed Jira status transitions and same-issue returns. Time-in-status
+uses timestamped intervals with known boundaries; initial and final intervals
+require complete history and, for the latter, a trustworthy Jira snapshot time.
+The current synchronizer does not establish a common project snapshot time, so
+parent-child closure timing is N/A for its snapshots rather than calculated to
+today. Parent status is Unknown if history completeness is unverified.
+The Issue and Link OLAP tables paginate all slices; issues may belong to
+several component slices while their overall count remains unique. Lifecycle
+uses the Jira resolution date, and link totals count directed records.
+Cross-Linkage classifies link records into four categories; unavailable unblock
+timing is N/A, duplicate elapsed time is calendar time rather than logged effort,
+and associations do not prove causation. The OLAP
 analyser also emits a cross-linkage cube (`jira_data_cube_crosslink.csv`).
 See [`skills_manifest.md`](skills_manifest.md) for the full specification.
 
@@ -317,13 +322,14 @@ newer; they use only standard libraries and do not require Jira data:
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py' -v
-node --test tests/test_trends_regressions.js
+node --test tests/test_trends_regressions.js tests/test_profile_olap.js
 ```
 
 The Node.js test loads the embedded JavaScript through `python3`. Set `PYTHON`
 to a Python executable if it is not available under that name.
 The suites cover Sprint parsing/coverage, all metric families, settings
-lifecycle, snapshot membership and chart/drilldown agreement. To also execute
+lifecycle, snapshot membership, chart/drilldown agreement and Jira Data Profile
+transition, timing, link and OLAP regressions. To also execute
 locally regenerated HTML, set `DEDAA_DASHBOARDS` to a JSON array of
 `{"path":"<local HTML path>","source":"jira"}` entries (`"calendar"` for a
 fallback project) before the Node command. Missing explicitly requested files

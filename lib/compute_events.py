@@ -1,8 +1,8 @@
 """Tab 3 Event-Driven Analytics (bug triggers, auto-transit, cohorts)."""
 from collections import Counter, defaultdict
-from datetime import datetime
 import json
-from .date_utils import _dt_full, _biweek, status_group, _status_events_from_text
+from .date_utils import (status_group, _status_events_from_text,
+                         _status_transitions_from_text, _utc_instant)
 
 # ============================================================================
 # Event-Driven Analytics (Tab 3) — advanced event/trigger analysis
@@ -15,25 +15,63 @@ from .date_utils import _dt_full, _biweek, status_group, _status_events_from_tex
 #           ping-pong rate vs the project baseline).
 # ============================================================================
 
-# A status-transition is classified as an "automation trigger" if the parent
-# changes status within this many seconds of its last child closing.
-AUTO_TRIGGER_WINDOW_SEC = 300
-
-
-def _parent_status_at(events, moment):
-    """Given a parent's sorted status-change events [(dt, to_status)] and a
-    moment, return the status the parent was in at that moment (the last event
-    whose time <= moment). If no transition happened before 'moment', default
-    to 'Open' (Jira's initial state)."""
-    if not events:
-        return "Open"
-    current = "Open"
-    for dt, to in events:
-        if dt <= moment:
-            current = to
-        else:
+def _parent_status_at(transitions, moment, parent):
+    """Return a known status at the event time, or Unknown."""
+    moment = _utc_instant(moment.isoformat())
+    created = _utc_instant(parent.get("created"))
+    if not parent.get("status_history_complete") or not created or moment < created:
+        return "Unknown"
+    if not transitions:
+        return parent.get("status") or "Unknown"
+    if (transitions[-1][2] != parent.get("status") or
+            any(a[2] != b[1] for a, b in zip(transitions, transitions[1:]))):
+        return "Unknown"
+    current = transitions[0][1]
+    for dt, before, after in transitions:
+        if dt > moment:
             break
+        if before != current:
+            return "Unknown"
+        current = after
     return current
+
+
+def _closure_sync(parent, children, docs):
+    snapshot = _utc_instant(parent.get("jira_snapshot_at"))
+    if not snapshot or not parent.get("status_history_complete"):
+        return None
+    try:
+        expected = json.loads(parent.get("subtask_keys_json") or "null")
+    except (TypeError, ValueError):
+        return None
+    if (not isinstance(expected, list) or not all(isinstance(key, str) for key in expected)
+            or set(expected) != {c.get("issue_key") for c in children}):
+        return None
+    last_closures = []
+    for child in children:
+        if (_utc_instant(child.get("jira_snapshot_at")) != snapshot or
+                not child.get("status_history_complete") or
+                status_group(child.get("status")) != "Closed"):
+            return None
+        events = _status_transitions_from_text(docs.get(child.get("issue_key")))
+        if not events or events[-1][2] != child.get("status") or events[-1][0] > snapshot:
+            return None
+        if any(a[2] != b[1] for a, b in zip(events, events[1:])):
+            return None
+        entered = [dt for dt, before, after in events
+                   if status_group(before) != "Closed" and status_group(after) == "Closed"]
+        if not entered:
+            return None
+        last_closures.append(entered[-1])
+    if not last_closures:
+        return None
+    events = _status_transitions_from_text(docs.get(parent.get("issue_key")))
+    if (events and (events[-1][0] > snapshot or events[-1][2] != parent.get("status") or
+                    any(a[2] != b[1] for a, b in zip(events, events[1:])))):
+        return None
+    last_closed = max(last_closures)
+    moved = any(dt > last_closed for dt, _, _ in events)
+    return moved, round((snapshot - last_closed).total_seconds() / 3600, 1)
 
 
 def compute_event_analytics(meta, docs):
@@ -88,6 +126,7 @@ def compute_event_analytics(meta, docs):
             recs = json.loads(raw)
         except Exception:
             return None, "link"
+        candidates = set()
         for r in recs:
             tgt_type = (r.get("target_type") or "").strip().lower()
             if tgt_type not in ("story", "task"):
@@ -97,8 +136,8 @@ def compute_event_analytics(meta, docs):
                                           "depend", "caus")):
                 tgt_key = r.get("target_key")
                 if tgt_key and tgt_key in meta_by_key:
-                    return tgt_key, "link"
-        return None, "link"
+                    candidates.add(tgt_key)
+        return (next(iter(candidates)), "link") if len(candidates) == 1 else (None, "link")
 
     m1a_total = 0
     m1a_with_parent = 0
@@ -109,14 +148,14 @@ def compute_event_analytics(meta, docs):
         if typ not in ("bug", "sub-bug"):
             continue
         m1a_total += 1
-        created = _dt_full(m.get("created"))
+        created = _utc_instant(m.get("created"))
         if not created:
             continue
         pk, how = _resolve_defect_parent(m)
         if not pk or pk not in doc_by_key:
             continue
-        parent_events = _status_events_from_text(doc_by_key.get(pk))
-        st = _parent_status_at(parent_events, created)
+        parent_events = _status_transitions_from_text(doc_by_key.get(pk))
+        st = _parent_status_at(parent_events, created, meta_by_key[pk])
         m1a_dist[st] += 1
         m1a_with_parent += 1
         m1a_pairs.append({
@@ -140,61 +179,26 @@ def compute_event_analytics(meta, docs):
         "na": m1a_with_parent == 0,
     }
 
-    # ---- Module 1b: Parent-Child Closure Sync Tracker ----------------------
-    # For every parent (ANY issue type) with Sub-task / Sub-Bug children,
-    # T_last_child = max(updated) among children that reached Closed/Resolved.
-    # Then check whether the parent's status CHANGED (any status transition)
-    # strictly after that moment. If it did NOT, the parent is "stuck" — it
-    # should have moved to its next workflow status (in testing / resolved /
-    # closed / done / ...) once all its children closed, but did not. This
-    # answers: "which parents fail to advance in their workflow after the last
-    # child closes?" — regardless of whether the transition is automated or
-    # manual.
-    m1b_stuck = []            # dicts: {type,key,url,status,latency_hrs}
-    m1b_parents = 0
-    m1b_moved = 0
-    for parent_key, children in children_by_parent.items():
-        parent_doc = doc_by_key.get(parent_key)
-        parent_events = _status_events_from_text(parent_doc) if parent_doc else []
-        if not parent_events:
+    m1b_stuck, m1b_moved, m1b_parents, m1b_unknown = [], 0, 0, 0
+    for key, children in children_by_parent.items():
+        parent = meta_by_key.get(key)
+        observation = _closure_sync(parent, children, doc_by_key) if parent else None
+        if observation is None:
+            m1b_unknown += 1
             continue
-        last_child_closed = None
-        for ch in children:
-            fst = (ch.get("status") or "").strip().lower()
-            if fst not in ("closed", "resolved"):
-                continue
-            upd = _dt_full(ch.get("updated")) or _dt_full(ch.get("done_date"))
-            if upd and (last_child_closed is None or upd > last_child_closed):
-                last_child_closed = upd
-        if last_child_closed is None:
-            continue
+        moved, latency = observation
         m1b_parents += 1
-        # Did the parent have ANY status transition strictly AFTER the last
-        # child closed?
-        moved = any(dt > last_child_closed for dt, _to in parent_events)
-        if moved:
+        if moved or status_group(parent.get("status")) == "Closed":
             m1b_moved += 1
-            continue
-        pm = meta_by_key.get(parent_key, {})
-        # Latency = time elapsed since the last child closed (stuck so far).
-        from datetime import timezone as _tz
-        latency_hrs = round((datetime.now(_tz.utc) - last_child_closed).total_seconds() / 3600.0, 1)
-        m1b_stuck.append({
-            "type": pm.get("type", "?"),
-            "key": parent_key,
-            "url": pm.get("url", ""),
-            "status": pm.get("status") or "None",
-            "latency_hrs": latency_hrs,
-        })
-
-    # Sort stuck parents by latency (longest first).
-    m1b_stuck.sort(key=lambda r: -r["latency_hrs"])
+        else:
+            m1b_stuck.append({"type": parent.get("type", "?"), "key": key,
+                              "url": parent.get("url", ""), "status": parent.get("status"),
+                              "latency_hrs": latency})
+    m1b_stuck.sort(key=lambda row: -row["latency_hrs"])
     module1b = {
-        "parents_analyzed": m1b_parents,
-        "moved": m1b_moved,
-        "stuck_count": len(m1b_stuck),
-        "stuck": m1b_stuck,
-        "na": m1b_parents == 0,
+        "parents_analyzed": m1b_parents, "moved": m1b_moved,
+        "stuck_count": len(m1b_stuck) if m1b_parents else None,
+        "stuck": m1b_stuck, "unknown_count": m1b_unknown, "na": m1b_parents == 0,
     }
 
     # ---- Module 1c: Sub-Bug Creation Constraints Validation ---------------
@@ -209,11 +213,11 @@ def compute_event_analytics(meta, docs):
         if typ != "sub-bug":
             continue
         pk = m.get("parent_key")
-        created = _dt_full(m.get("created"))
+        created = _utc_instant(m.get("created"))
         if not pk or pk not in doc_by_key or not created:
             continue
-        parent_events = _status_events_from_text(doc_by_key.get(pk))
-        st = _parent_status_at(parent_events, created)
+        parent_events = _status_transitions_from_text(doc_by_key.get(pk))
+        st = _parent_status_at(parent_events, created, meta_by_key[pk])
         m1c_dist[st] += 1
         m1c_total += 1
         m1c_pairs.append({
@@ -226,11 +230,13 @@ def compute_event_analytics(meta, docs):
          "pct": round(c / m1c_total_safe * 100, 1)}
         for st, c in m1c_dist.most_common()]
     m1c_in_testing = m1c_dist.get("In Testing", 0)
+    m1c_known = m1c_total - m1c_dist.get("Unknown", 0)
     module1c = {
         "total_pairs": m1c_total,
         "distribution": m1c_distribution_pct,
-        "in_testing_pct": round(m1c_in_testing / m1c_total_safe * 100, 1),
+        "in_testing_pct": round(m1c_in_testing / m1c_known * 100, 1) if m1c_known else None,
         "in_testing_count": m1c_in_testing,
+        "known_pairs": m1c_known,
         "pairs": m1c_pairs[:50],
         "na": m1c_total == 0,
     }
@@ -242,78 +248,13 @@ def compute_event_analytics(meta, docs):
     }
 
     # ---- Module 2: Auto-transit / Parent-Child sync -----------------------
-    auto_count = 0
-    manual_count = 0
-    target_status_counter = Counter()
-    mermaid_edges = Counter()   # (target_status, kind) -> count
-    parents_analyzed = 0
-
-    for parent_key, children in children_by_parent.items():
-        parent_doc = doc_by_key.get(parent_key)
-        parent_events = _status_events_from_text(parent_doc) if parent_doc else []
-        if not parent_events:
-            continue
-        # Timestamp of the LAST child that reached a final (Closed/Resolved)
-        # status.
-        last_child_closed = None
-        for ch in children:
-            fst = (ch.get("status") or "").strip().lower()
-            if fst not in ("closed", "resolved"):
-                continue
-            upd = _dt_full(ch.get("updated")) or _dt_full(ch.get("done_date"))
-            if upd and (last_child_closed is None or upd > last_child_closed):
-                last_child_closed = upd
-        if last_child_closed is None:
-            continue
-        parents_analyzed += 1
-        # Parent status transitions strictly AFTER the last child closed.
-        for dt, to in parent_events:
-            if dt <= last_child_closed:
-                continue
-            delta = (dt - last_child_closed).total_seconds()
-            target_status_counter[to] += 1
-            if delta <= AUTO_TRIGGER_WINDOW_SEC:
-                auto_count += 1
-                mermaid_edges[(to, "auto")] += 1
-            else:
-                manual_count += 1
-                mermaid_edges[(to, "manual")] += 1
-
-    m2_total = auto_count + manual_count
-    m2_auto_pct = round(auto_count / m2_total * 100, 1) if m2_total else 0.0
-    m2_manual_pct = round(manual_count / m2_total * 100, 1) if m2_total else 0.0
-    m2_targets = [{"status": st, "count": c}
-                  for st, c in target_status_counter.most_common()]
-    # Mermaid flow graph: [Last Sub-task Closed] -> target statuses, with the
-    # auto/manual split annotated on each edge.
-    mermaid_lines = ["graph LR",
-                     '    A["Last Sub-task Closed"]']
-    top_targets = target_status_counter.most_common(6)
-    for idx, (st, c) in enumerate(top_targets):
-        auto_edge = mermaid_edges.get((st, "auto"), 0)
-        man_edge = mermaid_edges.get((st, "manual"), 0)
-        pct = round(c / m2_total * 100, 1) if m2_total else 0.0
-        node = f"S{idx}"
-        mermaid_lines.append(f'    {node}["{st} ({pct}%)"]')
-        mermaid_lines.append(
-            f'    A -->|{auto_edge} auto / {man_edge} manual| {node}')
-    # Per-target-status auto/manual split for the stacked bar chart.
-    m2_auto_by_status = [
-        {"status": st, "count": mermaid_edges.get((st, "auto"), 0)}
-        for st, _ in target_status_counter.most_common()]
-    m2_manual_by_status = [
-        {"status": st, "count": mermaid_edges.get((st, "manual"), 0)}
-        for st, _ in target_status_counter.most_common()]
+    # Timestamps alone cannot identify automation versus manual actions.
     module2 = {
-        "parents_analyzed": parents_analyzed,
-        "transitions": m2_total,
-        "auto": {"count": auto_count, "pct": m2_auto_pct},
-        "manual": {"count": manual_count, "pct": m2_manual_pct},
-        "target_statuses": m2_targets,
-        "auto_by_status": m2_auto_by_status,
-        "manual_by_status": m2_manual_by_status,
-        "mermaid": "\n".join(mermaid_lines),
-        "na": parents_analyzed == 0,
+        "parents_analyzed": 0, "transitions": None,
+        "auto": {"count": None, "pct": None},
+        "manual": {"count": None, "pct": None},
+        "target_statuses": [], "auto_by_status": [], "manual_by_status": [],
+        "mermaid": "", "na": True,
     }
 
     # ---- Module 3: Metadata impact (labels vs cycle time / ping-pong) -----
@@ -334,18 +275,16 @@ def compute_event_analytics(meta, docs):
             return (first_done - first_ip).days
         return None
 
-    def _pingpong(doc):
-        """Count rework ping-pong transitions (In Testing->In Progress,
-        Closed->Reopened) in the issue changelog."""
-        ev = _status_events_from_text(doc)
-        count = 0
-        for i in range(1, len(ev)):
-            fr = ev[i - 1][1].strip().lower()
-            to = ev[i][1].strip().lower()
-            if (fr in ("in testing", "in qa") and to in ("in progress", "open")) \
-               or (fr in ("closed", "resolved") and to in ("reopened", "open")):
-                count += 1
-        return count
+    def _pingpong(m, doc):
+        """Count consecutive observed returns on the same issue."""
+        if not m.get("status_history_complete"):
+            return None
+        ev = _status_transitions_from_text(doc)
+        if ev and (ev[-1][2] != m.get("status") or
+                   any(a[2] != b[1] for a, b in zip(ev, ev[1:]))):
+            return None
+        return sum(a[1] == b[2] and a[2] == b[1] and a[1] != a[2]
+                   for a, b in zip(ev, ev[1:]))
 
     # Baseline across all work items (no label filter).
     base_cycles = []
@@ -358,7 +297,9 @@ def compute_event_analytics(meta, docs):
         c = _issue_cycle(m, d)
         if c is not None:
             base_cycles.append(c)
-        base_pings.append(_pingpong(d))
+        p = _pingpong(m, d)
+        if p is not None:
+            base_pings.append(p)
     from statistics import median
     base_cycle = median(base_cycles) if base_cycles else None
     base_ping = (sum(base_pings) / len(base_pings)) if base_pings else None
@@ -387,7 +328,9 @@ def compute_event_analytics(meta, docs):
             c = _issue_cycle(m, d)
             if c is not None:
                 cycles.append(c)
-            pings.append(_pingpong(d))
+            p = _pingpong(m, d)
+            if p is not None:
+                pings.append(p)
         if n == 0:
             continue
         cyc = median(cycles) if cycles else None

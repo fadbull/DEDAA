@@ -2,7 +2,7 @@
 from collections import Counter, defaultdict
 from datetime import datetime
 import json
-from .date_utils import _dt_full, status_group
+from .date_utils import _dt_full, _utc_datetime, status_group
 
 # ============================================================================
 # Jira Cross-Linkage & SDLC Waste analysis (Tab 3)
@@ -49,7 +49,7 @@ def compute_cross_linkage(meta, docs):
       summary: per-category counts {A: n, B: n, C: n, D: n} + total links
       category_A: {count, blocker_stagnation_rate, avg_reaction_hrs, pairs:[..]}
       category_B: {count, escaped_causes, avg_escaped_per_project, pairs:[..]}
-      category_C: {count, sunk_hours, sunk_days, closed_duplicates, pairs:[..]}
+      category_C: {count, elapsed_days, closed_duplicates, pairs:[..]}
       category_D: {count, sync_ratio, in_same_month, spread, pairs:[..]}
       network: [{source, target, category, type}]  (for the graph widget)
     """
@@ -82,51 +82,20 @@ def compute_cross_linkage(meta, docs):
             links.append({
                 "source": src, "type": r.get("type"),
                 "direction": r.get("direction"), "target": tgt,
+                "inward": r.get("inward"), "outward": r.get("outward"),
                 "category": cat,
             })
 
     # ---- Category A: Hard Blockers ----------------------------------------
-    # Reaction time = T_target_in_progress - T_unblocked. We approximate with
-    # the blocker's created -> the blocked issue's in_progress (if both known).
+    # Link removal/unblocking times are not present in the cached issue links.
     cat_a = [l for l in links if l["category"] == "A"]
-    a_reactions = []   # hours between blocker created and target in_progress
-    a_stagnant = 0     # targets that stayed in backlog > 24h after blocker
-    a_pairs = []
-    for l in cat_a:
-        src_m = meta_by_key.get(l["source"])
-        tgt_m = meta_by_key.get(l["target"])
-        if not src_m or not tgt_m:
-            continue
-        blocker_created = _dt_full(src_m.get("created"))
-        tgt_ip = _dt_full(tgt_m.get("in_progress_date"))
-        if blocker_created and tgt_ip and tgt_ip > blocker_created:
-            hrs = (tgt_ip - blocker_created).total_seconds() / 3600.0
-            a_reactions.append(hrs)
-            a_pairs.append({
-                "blocker": l["source"], "blocked": l["target"],
-                "reaction_hrs": round(hrs, 1),
-                "stagnant": hrs > 24,
-            })
-            if hrs > 24:
-                a_stagnant += 1
-        elif blocker_created and not tgt_ip:
-            # Blocked issue never started -> stagnation candidate.
-            a_stagnant += 1
-            a_pairs.append({
-                "blocker": l["source"], "blocked": l["target"],
-                "reaction_hrs": None, "stagnant": True,
-            })
     a_count = len(cat_a)
-    a_stagn_rate = round(a_stagnant / a_count * 100, 1) if a_count else None
-    a_avg_react = (sum(a_reactions) / len(a_reactions)) if a_reactions else None
     category_a = {
         "count": a_count,
-        "blocker_stagnation_rate": a_stagn_rate,
-        "avg_reaction_hrs": round(a_avg_react, 1) if a_avg_react is not None
-        else None,
-        "stagnant_count": a_stagnant,
-        "pairs": sorted(a_pairs, key=lambda p: -(
-            p["reaction_hrs"] or 0))[:15],
+        "blocker_stagnation_rate": None,
+        "avg_reaction_hrs": None,
+        "stagnant_count": None,
+        "pairs": [],
         "na": a_count == 0,
     }
 
@@ -136,51 +105,66 @@ def compute_cross_linkage(meta, docs):
     cat_b = [l for l in links if l["category"] == "B"]
     b_escaped = 0
     b_pairs = []
+    b_seen = set()
+    b_eligible = 0
     for l in cat_b:
         src_m = meta_by_key.get(l["source"])
         tgt_m = meta_by_key.get(l["target"])
         if not src_m or not tgt_m:
             continue
-        cause_created = _dt_full(src_m.get("created"))
-        src_done = _dt_full(src_m.get("done_date")) or _dt_full(
-            src_m.get("resolutiondate"))
-        # The 'cause' is the issue that triggered the rework; the source is the
-        # originating task. Escaped if the cause appeared after the source done.
-        if cause_created and src_done and cause_created > src_done:
+        label = (l.get(l["direction"]) or "").strip().lower() if l["direction"] in ("inward", "outward") else ""
+        if label == "causes":
+            origin, defect = src_m, tgt_m
+        elif label == "is caused by":
+            origin, defect = tgt_m, src_m
+        else:
+            continue
+        if (defect.get("type") or "").strip().lower() not in ("bug", "sub-bug"):
+            continue
+        pair = (origin.get("issue_key"), defect.get("issue_key"), l["type"])
+        if pair in b_seen:
+            continue
+        b_seen.add(pair)
+        defect_created = _utc_datetime(defect.get("created"))
+        origin_done = _utc_datetime(origin.get("resolutiondate"))
+        if not defect_created or not origin_done:
+            continue
+        b_eligible += 1
+        if defect_created > origin_done:
             b_escaped += 1
             b_pairs.append({
-                "cause": l["source"], "source": l["target"],
+                "cause": defect.get("issue_key"), "source": origin.get("issue_key"),
                 "escaped": True,
-                "cause_created": src_m.get("created"),
-                "source_done": src_m.get("done_date"),
+                "cause_created": defect.get("created"),
+                "source_done": origin.get("resolutiondate"),
             })
     b_count = len(cat_b)
     category_b = {
         "count": b_count,
-        "escaped_causes": b_escaped,
-        "avg_escaped_per_project": round(b_escaped, 2),
+        "escaped_causes": b_escaped if b_eligible else None,
+        "avg_escaped_per_project": float(b_escaped) if b_eligible else None,
+        "eligible_pairs": b_eligible,
         "pairs": b_pairs[:15],
         "na": b_count == 0,
     }
 
-    # ---- Category C: Scope Duplication (sunk hours) -----------------------
+    # ---- Category C: Scope Duplication (elapsed calendar time) -----------
     cat_c = [l for l in links if l["category"] == "C"]
-    # Sunk hours: for Closed issues with resolution Duplicate, sum the time
-    # spent In Progress before being closed as duplicate.
+    # This interval is elapsed calendar time, not logged work or effort.
     sunk_days = 0.0
     c_closed_dupes = 0
     c_pairs = []
     for m in meta:
         res = (m.get("resolution") or "").strip().lower()
-        if res not in ("duplicate", "duplicated", "won't fix"):
+        if res not in ("duplicate", "duplicated"):
             continue
         st = (m.get("status") or "").strip().lower()
         if st not in ("closed", "done", "resolved"):
             continue
         c_closed_dupes += 1
         # Time in progress = done_date - in_progress_date (if both known).
-        ip = _dt_full(m.get("in_progress_date"))
-        dn = _dt_full(m.get("done_date"))
+        ip = _utc_datetime(m.get("in_progress_date"))
+        dn = _utc_datetime(m.get("done_date"))
         if ip and dn and dn > ip:
             days = (dn - ip).total_seconds() / 86400.0
             sunk_days += days
@@ -191,8 +175,7 @@ def compute_cross_linkage(meta, docs):
     c_count = len(cat_c)
     category_c = {
         "count": c_count,
-        "sunk_hours": round(sunk_days * 24, 1),
-        "sunk_days": round(sunk_days, 1),
+        "elapsed_days": round(sunk_days, 1) if c_pairs else None,
         "closed_duplicates": c_closed_dupes,
         "pairs": sorted(c_pairs, key=lambda p: -p["sunk_days"])[:15],
         "na": c_count == 0 and c_closed_dupes == 0,
@@ -215,8 +198,7 @@ def compute_cross_linkage(meta, docs):
             "resolutiondate"))
         if s_done and t_done:
             d_total_pairs += 1
-            same = abs((s_done.year * 12 + s_done.month) -
-                       (t_done.year * 12 + t_done.month)) <= 1
+            same = (s_done.year, s_done.month) == (t_done.year, t_done.month)
             if same:
                 d_in_same_month += 1
             else:
@@ -233,8 +215,8 @@ def compute_cross_linkage(meta, docs):
     category_d = {
         "count": d_count,
         "sync_ratio": d_sync_ratio,
-        "in_same_month": d_in_same_month,
-        "spread": d_spread,
+        "in_same_month": d_in_same_month if d_total_pairs else None,
+        "spread": d_spread if d_total_pairs else None,
         "pairs": d_pairs[:15],
         "na": d_count == 0,
     }
@@ -279,14 +261,13 @@ def _print_crosslink_summary(cl):
           f"stagnation {_fmt(a.get('blocker_stagnation_rate'), '%')} · "
           f"avg reaction {_fmt(a.get('avg_reaction_hrs'), 'h')}")
     print(f" {'B':<4}{'Process Rework':<22}{s.get('B', 0):>6}  "
-          f"escaped causes {b.get('escaped_causes', 0)}")
+          f"escaped causes {_fmt(b.get('escaped_causes'))}")
     print(f" {'C':<4}{'Scope Duplication':<22}{s.get('C', 0):>6}  "
-          f"sunk hours {_fmt(c.get('sunk_hours'))} · "
+          f"elapsed days {_fmt(c.get('elapsed_days'))} · "
           f"closed dupes {c.get('closed_duplicates', 0)}")
     print(f" {'D':<4}{'Soft Associations':<22}{s.get('D', 0):>6}  "
           f"closure sync {_fmt(d.get('sync_ratio'), '%')} · "
-          f"same-month {d.get('in_same_month', 0)}")
+          f"same-month {_fmt(d.get('in_same_month'))}")
     print("-" * 78)
     print(f" TOTAL links: {cl.get('total_links', 0)}")
     print("=" * 78)
-

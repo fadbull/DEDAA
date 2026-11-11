@@ -683,6 +683,8 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             f"}}, options:{{indexAxis:'y', responsive:true, "
             f"maintainAspectRatio:false, plugins:{{legend:{{display:false}}}}, "
             f"scales:{{x:{{title:{{display:true, text:'median days'}}}}}}}} }});\n")
+    if not tis_widgets:
+        tis_widgets = "<div class='na-box'>N/A — no status intervals with known boundaries</div>"
 
     # 4e) OLAP Slice & Dice constructor data
     import json as _json
@@ -691,9 +693,10 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     def _olap_options(dim):
         seen = []
         for r in jp_olap_rows:
-            v = r.get(dim, "")
-            if v and v not in seen:
-                seen.append(v)
+            values = r.get("components", []) if dim == "component" else [r.get(dim, "")]
+            for v in values:
+                if v and v not in seen:
+                    seen.append(v)
         seen.sort()
         return "".join(f"<option value='{esc(v)}'>{esc(v)}</option>"
                        for v in seen)
@@ -703,7 +706,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     olap_status_opts = _olap_options("status")
     olap_component_opts = _olap_options("component")
     # Proper JS array literal (NOT a quoted string) for the client-side cube.
-    olap_rows_json = _json.dumps(jp_olap_rows)
+    olap_rows_json = _json.dumps(jp_olap_rows).replace("<", "\\u003c")
 
     # 4f) Issue-Links OLAP Slice & Dice constructor data (cube over issuelinks)
     jp_olap_link_dims = jprofile.get("olap_link_dims", [])
@@ -723,7 +726,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     olap_link_ttype_opts = _olap_link_options("target_type")
     olap_link_sstatus_opts = _olap_link_options("source_status")
     olap_link_tstatus_opts = _olap_link_options("target_status")
-    olap_link_rows_json = _json.dumps(jp_olap_link_rows)
+    olap_link_rows_json = _json.dumps(jp_olap_link_rows).replace("<", "\\u003c")
 
     # ==================================================================
     # SDLC PROCESS MATRIX — Issue Type x Status (heatmap) + VSM Gaps
@@ -811,7 +814,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     if m1a.get("na"):
         module1a_html = ("<div class='widget'><h3 class='font-medium mb-2'>"
                          "Story Status at Defect Birth" +
-                         _tip("For every Bug/Sub-Bug, the parent feature (Story/Task) is resolved via hard linkage: Sub-Bugs use the system parent field; Bugs use issuelinks (blocked-by / relates-to / associated / depends) to a Story/Task. The doughnut shows the parent's status at the exact second the defect was created (from the parent's changelog). Answers: 'in which phases do our stories generate bugs?'") +
+                         _tip("Shows the status at defect creation for a parent or a uniquely linked Story/Task. A link is an association, not proof of causation. Unknown means the parent's history is not known to be complete.") +
                          "</h3><div class='na-box'>N/A — no resolvable defect-parent links</div></div>")
         module1a_js = ""
     else:
@@ -823,7 +826,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         module1a_html = (
             "<div class='widget'><h3 class='font-medium mb-2'>Story Status at "
             "Defect Birth" +
-            _tip("For every Bug/Sub-Bug, the parent feature (Story/Task) is resolved via hard linkage: Sub-Bugs use the system parent field; Bugs use issuelinks (blocked-by / relates-to / associated / depends) to a Story/Task. The doughnut shows the parent's status at the exact second the defect was created (from the parent's changelog). Answers: 'in which phases do our stories generate bugs?'") +
+            _tip("Shows the status at defect creation for a parent or a uniquely linked Story/Task. A link is an association, not proof of causation. Unknown means the parent's history is not known to be complete.") +
             "</h3>"
             f"<p class='text-xs text-gray-500 mb-2'>Defects with a resolvable "
             f"parent: <strong>{m1a.get('with_parent', 0)}</strong> of "
@@ -852,17 +855,18 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         f"<td class='py-1 text-right font-mono'>{r.get('latency_hrs', 0)} h</td>"
         "</tr>"
         for r in m1b_stuck) or "<tr><td colspan='4'>None</td></tr>"
+    m1b_description = (
+        "N/A — a complete child set, complete status histories and a common Jira snapshot time are required."
+        if m1b.get("na") else
+        str(m1b.get("stuck_count")) + " parents had no subsequent status transition after all known children closed."
+    )
     module1b_html = (
         "<div class='widget'><h3 class='font-medium mb-2'>Parent-Child Closure "
         "Sync Tracker — Stuck Parents" +
-        _tip("For every parent (ANY issue type) with Sub-task / Sub-Bug children, computes T_last_child = max(updated) among children that reached Closed/Resolved. A parent is flagged as STUCK when it has NO status transition strictly after T_last_child — i.e. it did not advance to its next workflow status (in testing / resolved / closed / done / ...) once all its children closed. Latency = hours elapsed since the last child closed (still stuck).") +
+        _tip("Uses the final entry into a closed status for each child, complete histories, a complete child set and a common Jira snapshot time. An open parent with no subsequent status transition is an observation, not proof of a stalled workflow. Latency ends at the snapshot, not today.") +
         "</h3>"
-        "<p class='text-xs text-gray-500 mb-3'>Parents whose status did not "
-        "change after the last Sub-task / Sub-Bug closed, even though their "
-        "workflow (section 2) expects a move to the next status. "
-        "<strong>" + str(m1b.get("stuck_count", 0)) + "</strong> of "
-        "<strong>" + str(m1b.get("parents_analyzed", 0)) + "</strong> "
-        "analyzed parents are stuck.</p>"
+        "<p class='text-xs text-gray-500 mb-3'>" + m1b_description +
+        " Unknown parents: " + str(m1b.get("unknown_count", 0)) + ".</p>"
         "<div class='overflow-x-auto'><table class='w-full text-sm'>"
         "<thead><tr class='text-left border-b'><th class='py-2'>Issue Type (Parent)</th>"
         "<th>Issue</th><th>Parent Status</th><th class='text-right'>Latency (h)</th>"
@@ -878,11 +882,14 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
                          "</h3><div class='na-box'>N/A — no Sub-Bug pairs found</div></div>")
         module1c_js = ""
     else:
-        it_pct = m1c.get("in_testing_pct", 0)
-        hypothesis_ok = (it_pct == 100.0)
+        it_pct = m1c.get("in_testing_pct")
+        has_unknown = any(d["status"] == "Unknown" for d in m1c_dist)
+        hypothesis_ok = it_pct == 100.0 and not has_unknown
         verdict = ("✅ Hypothesis CONFIRMED — Sub-Bugs are created only while "
                    "the parent is In Testing."
                    if hypothesis_ok else
+                   "N/A — parent status history is incomplete."
+                   if has_unknown and all(d["status"] in ("Unknown", "In Testing") for d in m1c_dist) else
                    "⚠️ Hypothesis REJECTED — Sub-Bugs are also created while "
                    "the parent is in other statuses.")
         dist_rows = "".join(
@@ -903,7 +910,9 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             "<th>Count</th></tr></thead><tbody>" + dist_rows + "</tbody></table>"
             "<p class='text-xs text-gray-500 mt-2'>Pairs analyzed: <strong>" +
             str(m1c.get("total_pairs", 0)) + "</strong> · In Testing: <strong>" +
-            str(m1c.get("in_testing_pct", 0)) + "%</strong></p></div>")
+            (str(it_pct) + "%" if it_pct is not None else "N/A") +
+            "</strong> of known statuses · Known: " +
+            str(m1c.get("known_pairs", 0)) + "</p></div>")
         module1c_js = ""
 
     module1_html = module1a_html + module1b_html + module1c_html
@@ -911,14 +920,15 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
 
     # --- Module 3: Bubble chart — labels vs cycle time / ping-pong ---
     m3_base = ev_m3.get("baseline", {})
-    m3_cohorts = ev_m3.get("cohorts", [])
+    m3_cohorts = [c for c in ev_m3.get("cohorts", [])
+                  if c.get("cycle_days") is not None and c.get("pingpong") is not None]
     m3_risk = ev_m3.get("risk_labels", [])
     if not m3_cohorts:
         module3_html = ("<div class='widget'><h3 class='font-medium mb-2'>"
                         "Metadata Impact (Labels & Custom Fields)" +
                         _tip("Splits issues into cohorts by label (labels appearing in ≥3 issues only), computing each cohort's median cycle time and ping-pong (rework) rate versus the project baseline.") +
-                        "</h3><div class='na-box'>N/A — no label cohorts (labels "
-                        "appearing in ≥3 issues)</div></div>")
+                        "</h3><div class='na-box'>N/A — no label cohorts with "
+                        "known cycle time and complete status history</div></div>")
         module3_js = ""
     else:
         m3_bubbles = []
@@ -1017,7 +1027,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             "<tr><td class='py-1'>Stagnation rate (>24h)</td>"
             "<td class='text-right font-mono'>" + a_rate_s + "</td></tr>"
             "<tr><td class='py-1'>Stagnant blockers</td>"
-            "<td class='text-right font-mono'>" + str(cl_a.get("stagnant_count", 0)) +
+            "<td class='text-right font-mono'>" + (str(cl_a["stagnant_count"]) if cl_a.get("stagnant_count") is not None else "N/A") +
             "</td></tr></tbody></table>")
 
     # Category B callout
@@ -1029,11 +1039,11 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             "B", "Process Rework", "Escaped defects (cause after source closed)",
             "<table class='w-full text-sm'><tbody>"
             "<tr><td class='py-1'>Escaped causes</td>"
-            "<td class='text-right font-mono'>" + str(cl_b.get("escaped_causes", 0)) +
+            "<td class='text-right font-mono'>" + (str(cl_b["escaped_causes"]) if cl_b.get("escaped_causes") is not None else "N/A") +
             "</td></tr>"
-            "<tr><td class='py-1'>Avg escaped / project</td>"
+            "<tr><td class='py-1'>Eligible unique pairs</td>"
             "<td class='text-right font-mono'>" +
-            str(cl_b.get("avg_escaped_per_project", 0)) +
+            str(cl_b.get("eligible_pairs", 0)) +
             "</td></tr></tbody></table>")
 
     # Category C callout
@@ -1042,13 +1052,10 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
                                 "<div class='na-box'>N/A — no duplication links</div>")
     else:
         cl_c_html = _cl_callout(
-            "C", "Scope Duplication", "Waste scope (sunk hours in duplicates)",
+            "C", "Scope Duplication", "Elapsed time for issues resolved as duplicates",
             "<table class='w-full text-sm'><tbody>"
-            "<tr><td class='py-1'>Sunk hours</td>"
-            "<td class='text-right font-mono'>" + str(cl_c.get("sunk_hours", 0)) +
-            "</td></tr>"
-            "<tr><td class='py-1'>Sunk days</td>"
-            "<td class='text-right font-mono'>" + str(cl_c.get("sunk_days", 0)) +
+            "<tr><td class='py-1'>Elapsed calendar days</td>"
+            "<td class='text-right font-mono'>" + (str(cl_c["elapsed_days"]) if cl_c.get("elapsed_days") is not None else "N/A") +
             "</td></tr>"
             "<tr><td class='py-1'>Closed as duplicate</td>"
             "<td class='text-right font-mono'>" + str(cl_c.get("closed_duplicates", 0)) +
@@ -1065,12 +1072,12 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             "D", "Soft Associations", "Closure sync matrix",
             "<table class='w-full text-sm'><tbody>"
             "<tr><td class='py-1'>Same-month closure</td>"
-            "<td class='text-right font-mono'>" + str(cl_d.get("in_same_month", 0)) +
+            "<td class='text-right font-mono'>" + (str(cl_d["in_same_month"]) if cl_d.get("in_same_month") is not None else "N/A") +
             "</td></tr>"
             "<tr><td class='py-1'>Closure sync ratio</td>"
             "<td class='text-right font-mono'>" + d_sync_s + "</td></tr>"
             "<tr><td class='py-1'>Spread closures</td>"
-            "<td class='text-right font-mono'>" + str(cl_d.get("spread", 0)) +
+            "<td class='text-right font-mono'>" + (str(cl_d["spread"]) if cl_d.get("spread") is not None else "N/A") +
             "</td></tr></tbody></table>")
 
     # --- Doughnut: category distribution ---
@@ -1090,7 +1097,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
 
     crosslink_widget_html = """
       <div class="widget">
-        <h3 class="font-medium mb-2">Jira Cross-Linkage & SDLC Waste Dashboard""" + _tip("Classifies every issuelinks record across ALL issues (horizontal links, not just parent/child) into 4 macro-categories of SDLC waste. <b>A · Hard Blockers</b> (blocks / is blocked by / Depend) — links that stop other work; 'avg reaction' = hours from blocker creation to the blocked issue reaching In Progress, 'stagnation' = % of blocked targets stuck >24h (higher = more blocked pipeline). <b>B · Process Rework</b> (causes / is caused by) — 'escaped causes' = defects created AFTER their source issue was already closed (rework that should have been caught earlier). <b>C · Scope Duplication</b> (duplicates / clones / Cloners) — 'sunk hours' = time spent In Progress on issues later closed as Duplicate/Won't Fix (wasted effort); 'closed dupes' = count of such issues. <b>D · Soft Associations</b> (relates to / Related To / Part of) — 'closure sync' = % of linked pairs closed within the same month (higher = better coordinated delivery). The doughnut shows the share of each category among all links; each callout card reports the key metric for its category.") + """</h3>
+        <h3 class="font-medium mb-2">Jira Cross-Linkage & SDLC Waste Dashboard""" + _tip("Category counts are directed issue-link records and may include both ends of a link. A: unblock timing is unavailable without link history. B: unique directed causes links to bugs created after the source resolution, when both dates and link labels are known; association is not proof of causation. C: elapsed calendar days between recorded In Progress and Done for issues resolved as Duplicate; this is not logged effort. D: percentage of eligible link records with first recorded Done or resolution dates in the same calendar month.") + """</h3>
         <p class="text-xs text-gray-500 mb-3">Classified <strong>""" + str(cl_total) + """</strong> issue
         links across all issues into 4 macro-categories of SDLC waste.</p>
         <div class="grid md:grid-cols-2 gap-4">
@@ -1109,7 +1116,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
        <section id="d-events" class="scroll-mt-24">
          <h2 class="text-lg font-semibold mb-3">8. Event-Driven Analytics</h2>
          <p class="text-xs text-gray-500 mb-3">Advanced event analysis: defect
-         causality (story status at defect birth, parent-child closure sync,
+         associations (story status at defect birth, parent-child closure sync,
          sub-bug creation constraints), the impact of labels / custom fields on
          cycle time and rework, and the Jira Cross-Linkage & SDLC Waste
          classifier.</p>
@@ -1191,9 +1198,9 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             <div class="space-y-3">""" + vsm_cards + """</div>
           </div>
           <div class="widget">
-            <h3 class="font-medium mb-2">Backlog Stagnation — Open >180 days (by type)""" + _tip("Counts issues that have been sitting in an Open/Backlog status for more than 180 days (from their created date), grouped by Issue Type. High stagnation means requirements are aging in the backlog without being groomed, prioritized, or started.") + """</h3>
+            <h3 class="font-medium mb-2">Backlog Stagnation — Open >180 days (by type)""" + _tip("Counts issues continuously in Open or New for more than 180 days at the Jira snapshot, using complete status history. Issues without a trustworthy snapshot or complete history are unknown.") + """</h3>
             <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Type</th><th>Stagnant Open</th></tr></thead><tbody>""" + stag_rows + """</tbody></table>
-            <p class="text-xs text-gray-500 mt-2">Total: <strong>""" + str(jp_backlog.get("total", 0)) + """</strong> issues in Open >180 days.</p>
+            <p class="text-xs text-gray-500 mt-2">Total: <strong>""" + (str(jp_backlog["total"]) if jp_backlog.get("total") is not None else "N/A") + """</strong> issues in Open >180 days. Unknown: """ + str(jp_backlog.get("unknown", 0)) + """.</p>
           </div>
         </div>
       </section>
@@ -1201,7 +1208,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
       <section id="d-dependencies" class="scroll-mt-24">
         <h2 class="text-lg font-semibold mb-3">4. Field Dependencies & Trends</h2>
         <p class="text-xs text-gray-500 mb-3">Co-fill matrix shows what % of issues populate both fields (field correlation). Trend charts show how often each optional field is left empty over biweekly periods — a drop signals fields being neglected.</p>
-        <div class="widget mb-4"><h3 class="font-medium mb-2">Field Co-fill Correlation Matrix (% both populated)""" + _tip("For every pair of fields, the % of issues that populate BOTH fields simultaneously. Computed as: (issues where both fields are non-empty) ÷ (issues where at least one is populated) × 100. High co-fill between fields that should be independent may indicate redundant data entry; low co-fill between related fields suggests they are filled inconsistently.") + """</h3>""" + field_corr_html + """</div>
+        <div class="widget mb-4"><h3 class="font-medium mb-2">Field Co-fill Correlation Matrix (% both populated)""" + _tip("For every pair of fields, the % of all issues that populate BOTH fields simultaneously: (issues where both fields are non-empty) ÷ (all issues) × 100.") + """</h3>""" + field_corr_html + """</div>
         <div class="grid md:grid-cols-2 gap-4">""" + trend_series_html + """</div>
       </section>
 
@@ -1209,19 +1216,19 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         <h2 class="text-lg font-semibold mb-3">5. Transition Frequency & Intensity</h2>
         <p class="text-xs text-gray-500 mb-3">Heatmap of status-to-status transition counts from the changelog. The "ping-pong" table flags back-and-forth jumps (rework / churn) such as Closed ⇄ Reopened.</p>
         <div class="widget mb-4"><h3 class="font-medium mb-2">Transition Frequency Heatmap (From → To)""" + _tip("Counts, for every ordered status pair (From → To), how many times the team moved work that way, derived from the issue changelog. High-frequency cells reveal the dominant workflow path; unexpected jumps (e.g. To Do → Done) expose bypassed process steps.") + """</h3>""" + heatmap_html + """</div>
-        <div class="widget"><h3 class="font-medium mb-2">Ping-Pong (rework) Status Jumps""" + _tip("Identifies back-and-forth status churn (A→B then B→A), such as Closed ⇄ Reopened or In Testing ⇄ In Progress. Each row shows both directions plus the total. Frequent ping-pong is a strong signal of rework, unclear requirements, or process instability.") + """</h3>
+        <div class="widget"><h3 class="font-medium mb-2">Ping-Pong (rework) Status Jumps""" + _tip("Counts consecutive A→B and B→A transitions on the same issue. Each detected return contributes one transition to each direction. This is a potential signal of rework, not proof of its cause.") + """</h3>
           <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Pair</th><th>A→B</th><th>B→A</th><th>Total</th></tr></thead><tbody>""" + pingpong_rows + """</tbody></table></div>
       </section>
 
       <section id="d-timestatus" class="scroll-mt-24">
         <h2 class="text-lg font-semibold mb-3">6. Time-in-Status (Median Days per Status)</h2>
-        <p class="text-xs text-gray-500 mb-3">Median time issues spend in each status, per issue type. Red bars flag "stagnant" statuses where work typically dies (>60 days) — candidates for process intervention.</p>
+        <p class="text-xs text-gray-500 mb-3">Median of observed intervals with known start and end, per issue type. Incomplete histories and unknown snapshot times exclude intervals; results may not represent every issue. Red bars indicate medians over 60 days.</p>
         <div class="grid md:grid-cols-2 gap-4">""" + tis_widgets + """</div>
       </section>
 
       <section id="d-olap" class="scroll-mt-24">
         <h2 class="text-lg font-semibold mb-3">7. Interactive OLAP Slice & Dice Constructor""" + _tip("Interactive multidimensional analysis: pick any combination of dimensions (Issue Type, Assignee, Priority, Status, Component) and the table recomputes, for each slice, the task count and the average lifecycle in days (Resolution − Created). Use it to drill into where time and effort actually go.") + """</h2>
-        <p class="text-xs text-gray-500 mb-3">Slice the issue data cube by any combination of dimensions (Issue Type, Assignee, Priority, Status, Component). The table below shows task count and average lifecycle (resolution − created, days) for each slice. Use the filters to drill down.</p>
+        <p class="text-xs text-gray-500 mb-3">Slice by Issue Type, Assignee, Priority, Status and Component. An issue may appear in multiple component slices; the total counts unique issues. Lifecycle is Resolution date − Created; missing resolution dates are excluded from the average.</p>
         <div class="widget">
           <div class="flex flex-wrap gap-3 mb-3">
             <label class="text-sm">Issue Type
@@ -1260,6 +1267,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             </table>
           </div>
           <p class="text-xs text-gray-500 mt-2" id="olapSummary"></p>
+          <div class="flex gap-2 mt-2"><button id="olapPrev" type="button" onclick="olapPage(-1)">Previous</button><button id="olapNext" type="button" onclick="olapPage(1)">Next</button></div>
         </div>
 
         <div class="widget mt-4">
@@ -1308,6 +1316,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
             </table>
           </div>
           <p class="text-xs text-gray-500 mt-2" id="olapLinkSummary"></p>
+          <div class="flex gap-2 mt-2"><button id="olapLinkPrev" type="button" onclick="olapLinkPage(-1)">Previous</button><button id="olapLinkNext" type="button" onclick="olapLinkPage(1)">Next</button></div>
         </div>
       </section>
 
