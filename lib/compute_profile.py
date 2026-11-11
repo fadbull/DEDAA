@@ -38,9 +38,9 @@ def compute_jira_profile(meta, docs):
 
     # 1) Field Density: for each issue type, what fraction of issues populate
     #    each field (non-empty).
-    types = sorted({m.get("type", "?") for m in meta})
+    types = sorted({m.get("type") or "?" for m in meta})
     field_density = {}   # field -> {type: pct}
-    type_counts = Counter(m.get("type", "?") for m in meta)
+    type_counts = Counter(m.get("type") or "?" for m in meta)
     for field in JIRA_PROFILE_FIELDS:
         density = {}
         for t in types:
@@ -49,7 +49,7 @@ def compute_jira_profile(meta, docs):
                 density[t] = 0
                 continue
             filled = sum(1 for m in meta
-                         if m.get("type") == t and (m.get(field) or ""))
+                         if (m.get("type") or "?") == t and (m.get(field) or ""))
             density[t] = round(filled / total * 100, 1)
         field_density[field] = density
 
@@ -60,7 +60,7 @@ def compute_jira_profile(meta, docs):
     trans_by_type = defaultdict(Counter)
     states_by_type = defaultdict(Counter)
     for m, d in zip(meta, docs):
-        typ = m.get("type", "?")
+        typ = m.get("type") or "?"
         states_by_type[typ][m.get("status", "?")] += 1
         if "Status history" not in d:
             continue
@@ -82,25 +82,6 @@ def compute_jira_profile(meta, docs):
                             for (fr, to), c in top],
             "states": dict(states_by_type[typ].most_common()),
         }
-
-    # 4) Heuristic: Assignee <-> Component ownership grid.
-    #    (assignee, component) -> count, for issues with both.
-    assignee_component = Counter()
-    for m in meta:
-        assignee = m.get("assignee") or ""
-        comp = m.get("components") or ""
-        if not assignee or not comp:
-            continue
-        for c in [x.strip() for x in comp.split(",") if x.strip()]:
-            assignee_component[(assignee, c)] += 1
-
-    # 5) Heuristic: Reporter -> Priority escalation.
-    reporter_priority = Counter()
-    for m in meta:
-        reporter = m.get("reporter") or ""
-        prio = m.get("priority") or ""
-        if reporter and prio:
-            reporter_priority[(reporter, prio)] += 1
 
     # 6) Resolution & Status alignment anomalies.
     #    issues "Closed/Done/Resolved" but missing resolutiondate.
@@ -316,63 +297,36 @@ def compute_jira_profile(meta, docs):
     # 15) SDLC Process Matrix: Issue Type x Status distribution (heatmap).
     #     Rows = issue types, cols = key SDLC statuses, cells = % of that
     #     type's issues currently in that status.
-    sdlc_statuses = ["Analysis", "Open", "Ready for Development", "In Progress",
-                     "Ready for QA", "In Testing", "Resolved", "Closed"]
-    # Normalize status labels so "Ready For Grooming" ~ "Ready for Development".
-    def _sdlc_status(st):
-        s = (st or "").strip().lower()
-        if s in ("analysis", "design"):
-            return "Analysis"
-        if s in ("open", "new"):
-            return "Open"
-        if s in ("ready for development", "ready for grooming", "ready for demo"):
-            return "Ready for Development"
-        if s in ("in progress",):
-            return "In Progress"
-        if s in ("ready for qa", "in qa"):
-            return "Ready for QA"
-        if s in ("in testing", "in review"):
-            return "In Testing"
-        if s in ("resolved",):
-            return "Resolved"
-        if s in ("closed", "done", "complete", "completed", "released", "verified"):
-            return "Closed"
-        return None
-
-    sdlc_types = ["Story", "Bug", "Sub-Bug", "Task", "Security issue",
-                  "Sub-task", "Epic", "Improvement", "Test"]
-    type_status_counts = Counter()
-    type_total = Counter()
-    sdlc_matrix = {}   # type -> {status: pct}
+    type_status_counts = defaultdict(Counter)
     for m in meta:
-        t = m.get("type", "?")
-        st = _sdlc_status(m.get("status"))
-        if st:
-            type_status_counts[(t, st)] += 1
-            type_total[t] += 1
-    for t in sdlc_types:
-        total = type_total.get(t, 0)
-        row = {}
-        for st in sdlc_statuses:
-            c = type_status_counts.get((t, st), 0)
-            row[st] = round(c / total * 100, 1) if total else 0
-        sdlc_matrix[t] = row
+        t = (m.get("type") or "").strip() or "Unknown (missing)"
+        st = (m.get("status") or "").strip() or "Unknown (missing)"
+        type_status_counts[t][st] += 1
+    sdlc_types = sorted(type_status_counts, key=str.casefold)
+    sdlc_statuses = sorted({s for counts in type_status_counts.values() for s in counts},
+                           key=str.casefold)
+    type_total = {t: sum(counts.values()) for t, counts in type_status_counts.items()}
+    sdlc_counts = {t: {st: type_status_counts[t][st] for st in sdlc_statuses}
+                   for t in sdlc_types}
+    sdlc_matrix = {t: {st: round(sdlc_counts[t][st] / type_total[t] * 100, 1)
+                       for st in sdlc_statuses} for t in sdlc_types}
 
-    # 16) Value Stream Mapping Gaps — heuristic risk flags.
+    # 16) Value Stream Mapping Gaps.
     vsm_findings = []
 
-    # (a) Sub-Bug / Story ratio (Stories Leakage into Sub-Bugs).
+    # (a) Sub-Bug / Story ratio.
     n_story = type_counts.get("Story", 0)
     n_subbug = type_counts.get("Sub-Bug", 0)
     ratio = n_subbug / n_story if n_story else None
-    if ratio is not None and ratio > 0.2:
+    if ratio is not None:
+        relation = "at or below" if ratio <= 0.2 else "above"
         vsm_findings.append({
-            "level": "warning", "kind": "Stories Leakage into Sub-Bugs",
-            "message": ("Риск низкого качества первичной разработки "
-                        "(Stories Leakage into Sub-Bugs), отношение количества "
-                        f"Sub-Bug к Story выше 0.2 (ratio = {ratio:.2f}, "
-                        f"Sub-Bug={n_subbug}, Story={n_story})."),
-            "value": round(ratio, 2),
+            "level": "warning" if ratio <= 0.2 else "success",
+            "kind": "Sub-Bug / Story ratio",
+            "message": (f"Sub-Bug / Story = {n_subbug}/{n_story} = {ratio:.2f}; "
+                        f"{relation} the illustrative threshold of 0.2. "
+                        "This ratio does not establish a cause or quality outcome."),
+            "value": ratio,
         })
 
     # (b) Backlog Stagnation — issues in Open status older than 180 days,
@@ -409,10 +363,9 @@ def compute_jira_profile(meta, docs):
                           for t, c in stagnation.most_common()]
     if stagnation_total:
         vsm_findings.append({
-            "level": "warning", "kind": "Backlog Stagnation",
-            "message": (f"Мертвый объем бэклога (Backlog Stagnation Rate): "
-                        f"{stagnation_total} задач(и) в статусе Open со сроком "
-                        f"жизни > 180 дней."),
+            "level": "info", "kind": "Backlog Stagnation",
+            "message": (f"{stagnation_total} observed issues remained continuously "
+                        "in Open or New for more than 180 days at the snapshot."),
             "value": stagnation_total,
         })
 
@@ -423,34 +376,27 @@ def compute_jira_profile(meta, docs):
         if m.get("type") == "Security issue"
         and (m.get("status") or "").strip().lower() == "in progress")
     sec_pct = round(sec_in_progress / n_sec * 100, 1) if n_sec else None
-    if sec_pct is not None and sec_pct < 10:
-        vsm_findings.append({
-            "level": "warning", "kind": "Isolated Security Loop",
-            "message": (f"Изолированный контур безопасности (Security issues "
-                        f"игнорируются девелоперами), процент задач в активной "
-                        f"разработке < 10% (In Progress = {sec_pct}%, "
-                        f"{sec_in_progress}/{n_sec})."),
-            "value": sec_pct,
-        })
+    sec_statuses = Counter((m.get("status") or "").strip() or "Unknown (missing)"
+                           for m in meta if m.get("type") == "Security issue")
 
     return {
         "types": types,
         "sdlc_matrix": sdlc_matrix,
+        "sdlc_counts": sdlc_counts,
+        "sdlc_totals": type_total,
         "sdlc_statuses": sdlc_statuses,
         "sdlc_types": sdlc_types,
         "vsm_findings": vsm_findings,
         "subbug_story_ratio": ratio,
-        "backlog_stagnation": {"total": stagnation_total if stagnation_observed else None,
+        "backlog_stagnation": {"total": stagnation_total if stagnation_observed or not stagnation_unknown else None,
                                "by_type": stagnation_by_type,
                                "unknown": stagnation_unknown},
         "security_in_progress": {"count": sec_in_progress, "total": n_sec,
-                                 "pct": sec_pct},
+                                 "pct": sec_pct, "statuses": dict(sec_statuses)},
         "type_counts": dict(type_counts),
         "field_density": field_density,
         "data_type_map": data_type_map,
         "state_machines": state_machines,
-        "assignee_component": dict(assignee_component.most_common(40)),
-        "reporter_priority": dict(reporter_priority.most_common(40)),
         "alignment_anomalies": alignment_anomalies[:20],
         "open_with_resolution": open_with_resolution[:20],
         "priority_labels": dict(priority_labels),

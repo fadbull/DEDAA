@@ -68,6 +68,7 @@ def _render_html_shell(ctx):
     tab1_ts = ctx['tab1_ts']
     tab2_ts = ctx['tab2_ts']
     tab3_html = ctx['tab3_html']
+    sdlc_section_html = ctx['sdlc_section_html']
     tis_js = ctx['tis_js']
     trend_js = ctx['trend_js']
     value_prop = ctx['value_prop']
@@ -202,6 +203,7 @@ def _render_html_shell(ctx):
         <a href="#m-scope" class="sidebar-link block px-3 py-2 rounded-lg">Scope & Predictability</a>
         <a href="#m-quality" class="sidebar-link block px-3 py-2 rounded-lg">Quality & Tech Debt</a>
         <a href="#m-reports" class="sidebar-link block px-3 py-2 rounded-lg">Project Jira Reports</a>
+        <a href="#m-sdlc" class="sidebar-link block px-3 py-2 rounded-lg">SDLC Process Matrix</a>
       </div>
     </nav>
     <div class="flex-1 space-y-8">
@@ -459,6 +461,7 @@ def _render_html_shell(ctx):
         </div>
       </section>
 
+      """ + sdlc_section_html + """
     </div>
   </div>
 </div>

@@ -259,11 +259,11 @@ tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
   bands where applicable, trend conclusions and Δ% — see below), CFD,
   Cycle/Lead Time (from changelog),
   Throughput, Velocity, Backlog Health, Scope Change Volume, Bug Growth,
-  Defect Age, Quality Debts, Project Jira Reports.
+  Defect Age, Quality Debts, Project Jira Reports, and finally SDLC Process
+  Matrix with Value Stream Mapping Gaps (under work).
 - **Tab 3 — Jira Data Profile:** Schema & Field Usage, Core Workflows (Mermaid),
-  Heuristic Associations, SDLC Process Matrix (Issue Type × Status), Field
-  Dependencies & Trends, Transition Frequency, Time-in-Status, OLAP
-  Slice & Dice constructor, and **Event-Driven Analytics** (section 8).
+  Field Dependencies & Trends, Transition Frequency, Time-in-Status, OLAP
+  Slice & Dice constructor, and **Event-Driven Analytics (under work)** (section 7).
 
 **Process Metrics — Trends (Tab 2):** 20 metrics defined in
 `lib/dashboard/chart_config.py` (`RC_CFG`), derived per item in
@@ -322,6 +322,16 @@ Optional `DEDAA_DASHBOARDS` inputs execute regenerated local HTML and verify
 its period source, shared metric axes and independent Velocity accounting;
 the private dashboards are never required in a clean clone.
 
+**SDLC Process Matrix (Tab 2):** each observed Jira issue type and status has
+its own row or column; missing values use `Unknown (missing)`. Each percentage
+uses all issues of that type, and the total column exposes its denominator.
+The Sub-Bug / Story indicator is yellow at or below 0.2, green above 0.2,
+and N/A without Stories; the comparison uses the unrounded ratio. The
+illustrative threshold is not proof of quality or causation. Security status
+distribution is descriptive. Backlog observations require known continuous
+Open/New time at a trustworthy snapshot; unknown cases remain separate rather
+than being treated as zero.
+
 **Jira Data Profile:** transition counts use observed `from → to` changes;
 ping-pong requires consecutive return transitions on the same issue.
 Time-in-status uses intervals with known boundaries, while open intervals
@@ -331,7 +341,7 @@ matching slices; each issue can appear in multiple component slices, but the
 overall issue count is unique. Lifecycle uses resolution date minus creation
 date, and the links cube counts directed records rather than unique links.
 
-### 3.4 Event-Driven Analytics (Tab 3, section 8)
+### 3.4 Event-Driven Analytics (Tab 3, section 7; under work)
 
 Event analytics uses Jira parent fields and observed changelogs. Sub-Bugs use
 their parent; a Bug without a parent is associated with a Story/Task only if

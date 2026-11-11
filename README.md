@@ -260,7 +260,19 @@ resolved-minus-opened balance with that stable band: a growing backlog is
 Degrading (or Recovering if its balance trend is improving), while a shrinking
 backlog is Improving (or Slowing if its balance trend is worsening). The
 balance trend cannot reverse the net verdict. The widget reports Jira-derived measurements only;
-it does not establish an as-is assessment or baseline. The **Jira Data Profile**
+it does not establish an as-is assessment or baseline.
+
+The final **Process Metrics** section contains the SDLC matrix and the
+Value Stream Mapping Gaps (under work) widget. The matrix displays every Jira
+issue type and status separately; each cell is the share of all issues of that
+type, including missing statuses. Missing types or statuses are shown as
+`Unknown (missing)`.
+The Sub-Bug / Story indicator is yellow at or below 0.2, green above 0.2, and
+N/A without Stories; it uses the unrounded ratio. The illustrative threshold
+and security status distribution do not establish causes or quality outcomes.
+Backlog observations require complete history and a trustworthy snapshot.
+
+The **Jira Data Profile**
 tab counts observed Jira status transitions and same-issue returns. Time-in-status
 uses timestamped intervals with known boundaries; initial and final intervals
 require complete history and, for the latter, a trustworthy Jira snapshot time.
@@ -270,7 +282,8 @@ today. Parent status is Unknown if history completeness is unverified.
 The Issue and Link OLAP tables paginate all slices; issues may belong to
 several component slices while their overall count remains unique. Lifecycle
 uses the Jira resolution date, and link totals count directed records.
-Cross-Linkage classifies link records into four categories; unavailable unblock
+The Event-Driven Analytics section is marked **under work**. Cross-Linkage
+classifies link records into four categories; unavailable unblock
 timing is N/A, duplicate elapsed time is calendar time rather than logged effort,
 and associations do not prove causation. The OLAP
 analyser also emits a cross-linkage cube (`jira_data_cube_crosslink.csv`).

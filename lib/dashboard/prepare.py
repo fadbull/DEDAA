@@ -3,6 +3,7 @@ series / fragment and returns the render context (split from
 lib/dashboard_html.py; output is byte-identical to the monolith)."""
 import os
 from datetime import datetime
+from html import escape
 from ..dashboard_helpers import (esc, js_list, json_str, _tip,
     _dir_size_mb, _read_sync_marker, _fmt_ts, _rework_health_html)
 from ..chromadb_utils import dir_size_mb, collection_folder
@@ -470,8 +471,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     jp_field_density = jprofile.get("field_density", {})
     jp_data_types = jprofile.get("data_type_map", {})
     jp_sm = jprofile.get("state_machines", {})
-    jp_assignee_comp = jprofile.get("assignee_component", {})
-    jp_reporter_prio = jprofile.get("reporter_priority", {})
     jp_alignment = jprofile.get("alignment_anomalies", [])
     jp_open_res = jprofile.get("open_with_resolution", [])
 
@@ -546,20 +545,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         f"<td><a class='text-blue-600' href='{esc(a.get('url'))}' "
         f"target='_blank'>link</a></td></tr>"
         for a in jp_open_res) or "<tr><td colspan='4'>None</td></tr>"
-
-    # --- 3a) Assignee <-> Component ownership grid ---
-    ac_rows = "".join(
-        f"<tr><td class='py-1'>{esc(a)}</td><td class='py-1'>{esc(c)}</td>"
-        f"<td class='py-1'>{n}</td></tr>"
-        for (a, c), n in jp_assignee_comp.items()) or \
-        "<tr><td colspan='3'>N/A</td></tr>"
-
-    # --- 3b) Reporter -> Priority escalation ---
-    rp_rows = "".join(
-        f"<tr><td class='py-1'>{esc(r)}</td><td class='py-1'>{esc(p)}</td>"
-        f"<td class='py-1'>{n}</td></tr>"
-        for (r, p), n in jp_reporter_prio.items()) or \
-        "<tr><td colspan='3'>N/A</td></tr>"
 
     # ==================================================================
     # NEW WIDGET DATA (OLAP / analytics additions to Tab 3)
@@ -734,13 +719,14 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     jp_sdlc_matrix = jprofile.get("sdlc_matrix", {})
     jp_sdlc_statuses = jprofile.get("sdlc_statuses", [])
     jp_sdlc_types = jprofile.get("sdlc_types", [])
+    jp_sdlc_counts = jprofile.get("sdlc_counts", {})
+    jp_sdlc_totals = jprofile.get("sdlc_totals", {})
     jp_vsm = jprofile.get("vsm_findings", [])
-    jp_backlog = jprofile.get("backlog_stagnation", {})
     jp_sec = jprofile.get("security_in_progress", {})
     jp_subbug_ratio = jprofile.get("subbug_story_ratio")
 
     # --- Heatmap: rows = issue types, cols = statuses, cell = % ---
-    sdlc_head = ("<tr class='text-left border-b'><th class='py-2'>Issue Type</th>"
+    sdlc_head = ("<tr class='text-left border-b'><th class='py-2'>Issue Type</th><th>Total</th>"
                  + "".join(f"<th class='py-2 px-2 text-xs'>{esc(s)}</th>"
                            for s in jp_sdlc_statuses) + "</tr>")
     sdlc_body = ""
@@ -755,44 +741,47 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         cells = ""
         for s in jp_sdlc_statuses:
             v = row.get(s, 0)
-            if v:
+            count = jp_sdlc_counts.get(t, {}).get(s, 0)
+            if count:
                 alpha = 0.15 + 0.85 * (v / sdlc_max)
+                title = escape(f"{t} · {s}: {count} / {jp_sdlc_totals.get(t, 0)} ({v}%)", quote=True)
                 cells += (f"<td class='px-1 py-1 text-center text-xs' "
                           f"style='background:rgba(16,185,129,{alpha:.2f}); "
                           f"color:rgba(6,78,59,{1 if alpha>0.45 else 0.8})' "
-                          f"title='{esc(t)} · {esc(s)}: {v}%'>{v}%</td>")
+                          f"title='{title}'>{v}%</td>")
             else:
                 cells += "<td class='px-1 py-1 text-center text-gray-300'>·</td>"
-        sdlc_body += f"<tr><td class='py-1 font-medium text-xs'>{esc(t)}</td>{cells}</tr>"
+        sdlc_body += (f"<tr><td class='py-1 font-medium text-xs'>{esc(t)}</td>"
+                      f"<td>{jp_sdlc_totals.get(t, 0)}</td>{cells}</tr>")
     sdlc_heatmap_html = (
         "<div class='overflow-x-auto'><table class='w-full text-xs'>"
         f"<thead>{sdlc_head}</thead><tbody>{sdlc_body}</tbody></table></div>"
         if jp_sdlc_matrix else "<div class='na-box'>N/A</div>")
 
-    # --- Value Stream Mapping Gaps: heuristic risk findings ---
+    # --- Value Stream Mapping Gaps ---
     vsm_cards = ""
     if jp_vsm:
         for f in jp_vsm:
-            color = "#b45309" if f["level"] == "warning" else "#dc2626"
-            icon = "⚠️" if f["level"] == "warning" else "🔴"
+            color, icon = {
+                "warning": ("#b45309", "⚠️"),
+                "success": ("#16a34a", "🟢"),
+                "info": ("#6b7280", ""),
+            }[f["level"]]
             vsm_cards += (
                 f"<div class='widget border-l-4' style='border-left-color:{color}'>"
                 f"<h3 class='font-medium mb-1'>{icon} {esc(f['kind'])}</h3>"
                 f"<p class='text-sm text-gray-700'>{esc(f['message'])}</p>"
                 f"<p class='text-xs text-gray-400 mt-1'>metric value: "
                 f"{esc(f['value'])}</p></div>")
-    else:
-        vsm_cards = (
-            "<div class='widget'><h3 class='font-medium mb-2'>Value Stream "
-            "Mapping Gaps</h3><div class='na-box'>N/A — no risk flags "
-            "detected</div></div>")
-
-    # --- Backlog Stagnation detail table (per type) ---
-    stag_rows = "".join(
-        f"<tr><td class='py-1'>{esc(b['type'])}</td>"
-        f"<td class='py-1'>{b['count']}</td></tr>"
-        for b in jp_backlog.get("by_type", [])) or \
-        "<tr><td colspan='2'>N/A</td></tr>"
+    if jp_subbug_ratio is None:
+        vsm_cards += "<p class='text-xs text-gray-500'>Sub-Bug / Story ratio: N/A — no Story issues.</p>"
+    sec_total = jp_sec.get("total", 0)
+    sec_rows = "".join(
+        f"<li>{esc(status)}: {count} / {sec_total} ({count / sec_total * 100:.1f}%)</li>"
+        for status, count in sorted(jp_sec.get("statuses", {}).items())
+    ) or "<li>N/A — no Security issues</li>"
+    vsm_cards += ("<p class='text-xs mt-2'>Security issue statuses at the Jira snapshot:</p>"
+                  "<ul class='text-xs'>" + sec_rows + "</ul>")
 
     # ==================================================================
     # EVENT-DRIVEN ANALYTICS (Tab 3) — advanced event/trigger analysis
@@ -1112,9 +1101,21 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
       </div>
     """
 
+    sdlc_section_html = """
+      <section id="m-sdlc" class="scroll-mt-24">
+        <h2 class="text-lg font-semibold mb-3">SDLC Process Matrix — Issue Type vs Status Dependencies</h2>
+        <p class="text-xs text-gray-500 mb-3">Distribution of the issue types and statuses in the Jira snapshot. Statuses are shown separately; missing values are Unknown (missing).</p>
+        <div class="widget mb-4"><h3 class="font-medium mb-2">SDLC Process Matrix — Issue Type vs Status Dependencies""" + _tip("For each issue type and Jira status, the number of issues in that status divided by all issues of the same type, including missing statuses. Total is the issue count for the row. Jira status names are not grouped; Unknown (missing) indicates missing values. Percentages may not add to exactly 100% due to rounding. These are snapshot distributions, not evidence that work is stuck.") + """</h3>""" + sdlc_heatmap_html + """</div>
+        <div class="widget">
+          <h3 class="font-medium mb-2">Value Stream Mapping Gaps (under work)""" + _tip("Sub-Bug / Story is the count of all Sub-Bugs divided by all Stories. The sign is yellow at or below 0.2, green above 0.2, and absent when there are no Stories; the comparison uses the unrounded ratio. This illustrative threshold is not evidence of quality or causation. Security statuses are a snapshot distribution, not evidence of neglect. Backlog observations use only issues with known continuous Open/New time at a trustworthy snapshot; unknown cases are excluded.") + """</h3>
+          <div class="space-y-3">""" + vsm_cards + """</div>
+        </div>
+      </section>
+    """
+
     event_section_html = """
        <section id="d-events" class="scroll-mt-24">
-         <h2 class="text-lg font-semibold mb-3">8. Event-Driven Analytics</h2>
+         <h2 class="text-lg font-semibold mb-3">7. Event-Driven Analytics (under work)</h2>
          <p class="text-xs text-gray-500 mb-3">Advanced event analysis: defect
          associations (story status at defect birth, parent-child closure sync,
          sub-bug creation constraints), the impact of labels / custom fields on
@@ -1147,13 +1148,11 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
       <div class="sticky top-20 space-y-1 text-sm">
         <a href="#d-schema" class="sidebar-link block px-3 py-2 rounded-lg">1. Schema & Field Usage</a>
         <a href="#d-workflows" class="sidebar-link block px-3 py-2 rounded-lg">2. Core Workflows</a>
-        <a href="#d-heuristics" class="sidebar-link block px-3 py-2 rounded-lg">3. Heuristic Associations</a>
-        <a href="#d-sdlc" class="sidebar-link block px-3 py-2 rounded-lg">3b. SDLC Process Matrix</a>
-        <a href="#d-dependencies" class="sidebar-link block px-3 py-2 rounded-lg">4. Field Dependencies & Trends</a>
-        <a href="#d-transitions" class="sidebar-link block px-3 py-2 rounded-lg">5. Transition Frequency</a>
-        <a href="#d-timestatus" class="sidebar-link block px-3 py-2 rounded-lg">6. Time-in-Status</a>
-        <a href="#d-olap" class="sidebar-link block px-3 py-2 rounded-lg">7. OLAP Slice & Dice</a>
-        <a href="#d-events" class="sidebar-link block px-3 py-2 rounded-lg">8. Event-Driven Analytics</a>
+        <a href="#d-dependencies" class="sidebar-link block px-3 py-2 rounded-lg">3. Field Dependencies & Trends</a>
+        <a href="#d-transitions" class="sidebar-link block px-3 py-2 rounded-lg">4. Transition Frequency</a>
+        <a href="#d-timestatus" class="sidebar-link block px-3 py-2 rounded-lg">5. Time-in-Status</a>
+        <a href="#d-olap" class="sidebar-link block px-3 py-2 rounded-lg">6. OLAP Slice & Dice</a>
+        <a href="#d-events" class="sidebar-link block px-3 py-2 rounded-lg">7. Event-Driven Analytics (under work)</a>
       </div>
     </nav>
     <div class="flex-1 space-y-8">
@@ -1178,42 +1177,15 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         </div>
       </section>
 
-      <section id="d-heuristics" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">3. Heuristic & Structural Associations</h2>
-        <div class="grid md:grid-cols-2 gap-4">
-          <div class="widget"><h3 class="font-medium mb-2">Assignee → Component (Ownership)""" + _tip("Cross-tabulation of who (Assignee) works on which Component, with the number of issues. Highlights ownership concentration: a single assignee owning many components (or a component with many assignees) can indicate bus-factor risk or unclear ownership.") + """</h3>
-            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Assignee</th><th>Component</th><th>Issues</th></tr></thead><tbody>""" + ac_rows + """</tbody></table></div>
-          <div class="widget"><h3 class="font-medium mb-2">Reporter → Priority (Escalation)""" + _tip("Cross-tabulation of who (Reporter) raises issues at which Priority level. Reveals escalation patterns and which reporters tend to open high-priority work — useful for triage and stakeholder management.") + """</h3>
-            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Reporter</th><th>Priority</th><th>Issues</th></tr></thead><tbody>""" + rp_rows + """</tbody></table></div>
-        </div>
-      </section>
-
-      <section id="d-sdlc" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">3b. SDLC Process Matrix — Issue Type vs Status Dependencies</h2>
-        <p class="text-xs text-gray-500 mb-3">Cross-tabulation of every Issue Type against the key SDLC statuses. Each cell shows the % of that type's issues currently in that status. The Value Stream Mapping Gaps panel renders automatic heuristic risk flags for delivery health.</p>
-        <div class="widget mb-4"><h3 class="font-medium mb-2">Issue Type × Status Distribution (% of issues)""" + _tip("For each Issue Type, the share of its issues currently sitting in each SDLC status. Computed as: (issues of the type in that status) ÷ (all issues of that type) × 100. Reveals where work concentrates across the value stream (e.g. a type stuck mostly in Analysis/Backlog vs mostly in Testing).") + """</h3>""" + sdlc_heatmap_html + """</div>
-        <div class="grid md:grid-cols-3 gap-4">
-          <div class="widget md:col-span-2">
-            <h3 class="font-medium mb-2">Value Stream Mapping Gaps (heuristic risk flags)""" + _tip("Automatic heuristic flags for delivery-health risks: e.g. too much work in early stages (Analysis/Backlog) vs too little in review, high rework, or unbalanced WIP across statuses. Each card lists the affected type, the rule that fired, and its severity.") + """</h3>
-            <div class="space-y-3">""" + vsm_cards + """</div>
-          </div>
-          <div class="widget">
-            <h3 class="font-medium mb-2">Backlog Stagnation — Open >180 days (by type)""" + _tip("Counts issues continuously in Open or New for more than 180 days at the Jira snapshot, using complete status history. Issues without a trustworthy snapshot or complete history are unknown.") + """</h3>
-            <table class="w-full text-sm"><thead><tr class="text-left border-b"><th class="py-2">Type</th><th>Stagnant Open</th></tr></thead><tbody>""" + stag_rows + """</tbody></table>
-            <p class="text-xs text-gray-500 mt-2">Total: <strong>""" + (str(jp_backlog["total"]) if jp_backlog.get("total") is not None else "N/A") + """</strong> issues in Open >180 days. Unknown: """ + str(jp_backlog.get("unknown", 0)) + """.</p>
-          </div>
-        </div>
-      </section>
-
       <section id="d-dependencies" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">4. Field Dependencies & Trends</h2>
+        <h2 class="text-lg font-semibold mb-3">3. Field Dependencies & Trends</h2>
         <p class="text-xs text-gray-500 mb-3">Co-fill matrix shows what % of issues populate both fields (field correlation). Trend charts show how often each optional field is left empty over biweekly periods — a drop signals fields being neglected.</p>
         <div class="widget mb-4"><h3 class="font-medium mb-2">Field Co-fill Correlation Matrix (% both populated)""" + _tip("For every pair of fields, the % of all issues that populate BOTH fields simultaneously: (issues where both fields are non-empty) ÷ (all issues) × 100.") + """</h3>""" + field_corr_html + """</div>
         <div class="grid md:grid-cols-2 gap-4">""" + trend_series_html + """</div>
       </section>
 
       <section id="d-transitions" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">5. Transition Frequency & Intensity</h2>
+        <h2 class="text-lg font-semibold mb-3">4. Transition Frequency & Intensity</h2>
         <p class="text-xs text-gray-500 mb-3">Heatmap of status-to-status transition counts from the changelog. The "ping-pong" table flags back-and-forth jumps (rework / churn) such as Closed ⇄ Reopened.</p>
         <div class="widget mb-4"><h3 class="font-medium mb-2">Transition Frequency Heatmap (From → To)""" + _tip("Counts, for every ordered status pair (From → To), how many times the team moved work that way, derived from the issue changelog. High-frequency cells reveal the dominant workflow path; unexpected jumps (e.g. To Do → Done) expose bypassed process steps.") + """</h3>""" + heatmap_html + """</div>
         <div class="widget"><h3 class="font-medium mb-2">Ping-Pong (rework) Status Jumps""" + _tip("Counts consecutive A→B and B→A transitions on the same issue. Each detected return contributes one transition to each direction. This is a potential signal of rework, not proof of its cause.") + """</h3>
@@ -1221,13 +1193,13 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
       </section>
 
       <section id="d-timestatus" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">6. Time-in-Status (Median Days per Status)</h2>
+        <h2 class="text-lg font-semibold mb-3">5. Time-in-Status (Median Days per Status)</h2>
         <p class="text-xs text-gray-500 mb-3">Median of observed intervals with known start and end, per issue type. Incomplete histories and unknown snapshot times exclude intervals; results may not represent every issue. Red bars indicate medians over 60 days.</p>
         <div class="grid md:grid-cols-2 gap-4">""" + tis_widgets + """</div>
       </section>
 
       <section id="d-olap" class="scroll-mt-24">
-        <h2 class="text-lg font-semibold mb-3">7. Interactive OLAP Slice & Dice Constructor""" + _tip("Interactive multidimensional analysis: pick any combination of dimensions (Issue Type, Assignee, Priority, Status, Component) and the table recomputes, for each slice, the task count and the average lifecycle in days (Resolution − Created). Use it to drill into where time and effort actually go.") + """</h2>
+        <h2 class="text-lg font-semibold mb-3">6. Interactive OLAP Slice & Dice Constructor""" + _tip("Interactive multidimensional analysis: pick any combination of dimensions (Issue Type, Assignee, Priority, Status, Component) and the table recomputes, for each slice, the task count and the average lifecycle in days (Resolution − Created). Use it to drill into where time and effort actually go.") + """</h2>
         <p class="text-xs text-gray-500 mb-3">Slice by Issue Type, Assignee, Priority, Status and Component. An issue may appear in multiple component slices; the total counts unique issues. Lifecycle is Resolution date − Created; missing resolution dates are excluded from the average.</p>
         <div class="widget">
           <div class="flex flex-wrap gap-3 mb-3">
@@ -1380,6 +1352,7 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     ctx['tab1_ts'] = tab1_ts
     ctx['tab2_ts'] = tab2_ts
     ctx['tab3_html'] = tab3_html
+    ctx['sdlc_section_html'] = sdlc_section_html
     ctx['tis_js'] = tis_js
     ctx['trend_js'] = trend_js
     ctx['value_prop'] = value_prop
