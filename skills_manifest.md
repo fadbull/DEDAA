@@ -174,8 +174,7 @@ python sync_agent.py --help
 - **Issue links extraction:** `sync_agent.py` normalizes the raw `issuelinks`
   array into structured records (type, inward/outward, direction, target key /
   summary / status / type) and stores them as a JSON string in the `issuelinks`
-  metadata field. This powers the **Jira Cross-Linkage & SDLC Waste** analysis
-  (Module 4) in Skill #2.
+  metadata field. This powers the OLAP cross-linkage cube in Skill #2.
 - **Image / schema extraction:** with `--save-images`, downloads image
   attachments (architecture/workflow schemas) into `<db-path>/<assets-dir>` and
   records local path + source URL in the page metadata.
@@ -262,8 +261,8 @@ tabs (Tailwind CSS + Chart.js + Mermaid.js via CDN):
   Defect Age, Quality Debts, Project Jira Reports, and finally SDLC Process
   Matrix with Value Stream Mapping Gaps (under work).
 - **Tab 3 — Jira Data Profile:** Schema & Field Usage, Core Workflows (Mermaid),
-  Field Dependencies & Trends, Transition Frequency, Time-in-Status, OLAP
-  Slice & Dice constructor, and **Event-Driven Analytics (under work)** (section 7).
+  Field Dependencies & Trends, Transition Frequency, Time-in-Status, and the
+  OLAP Slice & Dice constructor.
 
 **Process Metrics — Trends (Tab 2):** 20 metrics defined in
 `lib/dashboard/chart_config.py` (`RC_CFG`), derived per item in
@@ -341,50 +340,6 @@ matching slices; each issue can appear in multiple component slices, but the
 overall issue count is unique. Lifecycle uses resolution date minus creation
 date, and the links cube counts directed records rather than unique links.
 
-### 3.4 Event-Driven Analytics (Tab 3, section 7; under work)
-
-Event analytics uses Jira parent fields and observed changelogs. Sub-Bugs use
-their parent; a Bug without a parent is associated with a Story/Task only if
-exactly one qualifying linked issue is found. Such a link is not proof of
-causation. Parent status at defect creation is **Unknown** if the history is
-not known to be complete; it is never assumed to be Open. Unknown statuses do
-not by themselves confirm or reject the Sub-Bug status hypothesis.
-
-Parent-child closure tracking requires the complete child key list, complete
-status histories and a common trustworthy `jira_snapshot_at` for parent and
-children. It uses actual transitions into closed status and ends latency at
-that snapshot. The current synchronizer records child keys and changelog
-completeness when Jira supplies them, but does not establish a common project
-snapshot; existing caches also lack these guarantees. Consequently this
-tracker is N/A for such data, not a count of zero stalled parents. Timing alone
-cannot prove automation versus manual action.
-
-- **Module 3 — Metadata impact (Bubble chart):** splits issues into cohorts by
-  label (labels appearing in ≥3 issues only), computing each cohort's **median
-  cycle time** and **ping-pong (rework) rate** versus the project baseline.
-  Cohorts above baseline in BOTH dimensions are flagged **⚠️ High Risk Scope**
-  and highlighted red.
-- **Module 4 — Jira Cross-Linkage & SDLC Waste (Doughnut + callout cards +
-  Mermaid network):** classifies every `issuelinks` record across ALL issues
-  (horizontal links, not just the vertical parent/child hierarchy) into 4
-  macro-categories of SDLC waste:
-  - **A · Hard Blockers** — timing and stagnation are N/A without unblock
-    event history; link creation or issue update is not an unblock timestamp.
-  - **B · Process Rework** — counts unique eligible directed `causes` links
-    where a Bug/Sub-Bug was created after the source issue's resolution date.
-    Missing direction, labels, dates or issue data are excluded.
-  - **C · Scope Duplication** — reports elapsed calendar days between recorded
-    In Progress and Done for issues resolved `Duplicate`; this is not work
-    logged or effort, and `Won't Fix` is not a duplicate.
-  - **D · Soft Associations** (`relates to`, `Related To`, `Part of`) — builds a
-    **closure sync matrix** (ratio of linked pairs closed within the same
-    month).
-  Renders a category-distribution doughnut, one **Process Waste callout card**
-  per category (each shows "N/A" when the category is absent), and an
-  **interdependence network** (Mermaid graph, edges colored by category, capped
-  at 60 visible / 400 collected). Requires `issuelinks` metadata (populated by
-  `sync_agent.py`).
-
 **Mandatory rules:**
 - **Source links:** every finding/claim must carry a clickable source `url`
   from metadata; if unavailable, render "N/A".
@@ -404,7 +359,7 @@ cannot prove automation versus manual action.
   statuses; the base tooltips use neutral wording like «first dev-start
   status» / «first QA-exit status»).
 
-### 3.5 OLAP Analyser
+### 3.4 OLAP Analyser
 
 The OLAP analyser lives in `lib/olap_analyser.py` and runs automatically
 (unless `--skip-olap`). It computes field density, status frequency, median

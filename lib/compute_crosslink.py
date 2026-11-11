@@ -112,6 +112,12 @@ def compute_cross_linkage(meta, docs):
         tgt_m = meta_by_key.get(l["target"])
         if not src_m or not tgt_m:
             continue
+        # [P24-W6] Direction semantics (see parse_issuelinks + the escaped-
+        # defect regression test): a record stored on X with direction
+        # 'outward' reads "X <label> target". For 'causes' ("X causes Y")
+        # the origin is X (the closed work item) and Y is the linked defect
+        # whose creation we compare against; for 'is caused by' ("X is
+        # caused by Y") the roles flip: origin=target, defect=X.
         label = (l.get(l["direction"]) or "").strip().lower() if l["direction"] in ("inward", "outward") else ""
         if label == "causes":
             origin, defect = src_m, tgt_m
@@ -149,10 +155,15 @@ def compute_cross_linkage(meta, docs):
     }
 
     # ---- Category C: Scope Duplication (elapsed calendar time) -----------
+    # [P24-W7] TWO DIFFERENT populations: category-C link RECORDS (the
+    # directed issuelinks entries) vs issues RESOLVED AS DUPLICATE. The
+    # elapsed interval is calendar time between the recorded In Progress and
+    # Done transitions — not logged effort or "waste".
     cat_c = [l for l in links if l["category"] == "C"]
-    # This interval is elapsed calendar time, not logged work or effort.
-    sunk_days = 0.0
+    elapsed_days = 0.0
     c_closed_dupes = 0
+    c_days_pairs = 0
+    c_days_missing = 0
     c_pairs = []
     for m in meta:
         res = (m.get("resolution") or "").strip().lower()
@@ -162,22 +173,27 @@ def compute_cross_linkage(meta, docs):
         if st not in ("closed", "done", "resolved"):
             continue
         c_closed_dupes += 1
-        # Time in progress = done_date - in_progress_date (if both known).
+        # Elapsed calendar time = done_date - in_progress_date (if both known).
         ip = _utc_datetime(m.get("in_progress_date"))
         dn = _utc_datetime(m.get("done_date"))
         if ip and dn and dn > ip:
             days = (dn - ip).total_seconds() / 86400.0
-            sunk_days += days
+            elapsed_days += days
+            c_days_pairs += 1
             c_pairs.append({
-                "issue": m.get("issue_key"), "sunk_days": round(days, 2),
+                "issue": m.get("issue_key"), "elapsed_days": round(days, 2),
                 "type": m.get("type"),
             })
+        else:
+            c_days_missing += 1
     c_count = len(cat_c)
     category_c = {
         "count": c_count,
-        "elapsed_days": round(sunk_days, 1) if c_pairs else None,
+        "elapsed_days": round(elapsed_days, 1) if c_days_pairs else None,
+        "elapsed_days_pairs": c_days_pairs,
+        "elapsed_days_missing": c_days_missing,
         "closed_duplicates": c_closed_dupes,
-        "pairs": sorted(c_pairs, key=lambda p: -p["sunk_days"])[:15],
+        "pairs": sorted(c_pairs, key=lambda p: -p["elapsed_days"])[:15],
         "na": c_count == 0 and c_closed_dupes == 0,
     }
 

@@ -6,7 +6,6 @@ from .compute_jira import compute_jira
 from .compute_product import compute_product, compute_reports
 from .compute_artifacts import compute_artifacts
 from .compute_profile import compute_jira_profile
-from .compute_events import compute_event_analytics
 from .compute_crosslink import (compute_cross_linkage,
     _print_crosslink_summary, _link_category)
 from .dashboard_html import build_dashboard
@@ -141,8 +140,9 @@ def run_dashboard(db_path, output, jc, rc, cc, dry_run, metric_settings=None):
         jm = compute_jira(jira["metadatas"], jira["documents"],
                           settings=metric_settings)
         jprofile = compute_jira_profile(jira["metadatas"], jira["documents"])
-        event_analytics = compute_event_analytics(jira["metadatas"],
-                                                  jira["documents"])
+        # [P25] The Event-Driven Analytics section was removed from the
+        # dashboard; compute_cross_linkage stays (OLAP crosslink cube +
+        # console summary).
         cross_linkage = compute_cross_linkage(jira["metadatas"],
                                               jira["documents"])
         print(f"[Skill#2] Jira issues: {jm['total']}")
@@ -155,7 +155,7 @@ def run_dashboard(db_path, output, jc, rc, cc, dry_run, metric_settings=None):
         _print_crosslink_summary(cross_linkage)
     else:
         print(f"[Skill#2] WARNING: '{jc}' empty/not found.")
-        jm, jprofile, event_analytics = None, {}, {}
+        jm, jprofile = None, {}
         cross_linkage = {}
 
     if conf and conf.get("ids"):
@@ -184,7 +184,6 @@ def run_dashboard(db_path, output, jc, rc, cc, dry_run, metric_settings=None):
     out = os.path.abspath(output)
     html = build_dashboard(jm, pages, db_path, reports_data=reports_data,
                            artifacts=artifacts, jprofile=jprofile,
-                           event_analytics=event_analytics,
                            cross_linkage=cross_linkage,
                            collection_map=collection_map, output_path=out,
                            metric_settings=metric_settings)

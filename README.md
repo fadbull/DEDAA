@@ -56,8 +56,7 @@ DEDAA/
 │   ├── compute_product.py     #   compute_product(), compute_reports()
 │   ├── compute_artifacts.py   #   Confluence text scanning (Skill #2)
 │   ├── compute_profile.py     #   Jira data profile (field density, workflows)
-│   ├── compute_events.py      #   Event-driven analytics (bug triggers, sync)
-│   ├── compute_crosslink.py   #   Cross-linkage / SDLC waste analysis
+│   ├── compute_crosslink.py   #   Link classifier for the OLAP crosslink cube
 │   ├── dashboard_helpers.py   #   esc(), js_list(), json_str() helpers
 │   ├── dashboard_html.py      #   Dashboard shell assembly
 │   ├── olap_analyser.py       #   OLAP cube: load_issues(), time-in-status, pivot
@@ -282,12 +281,10 @@ today. Parent status is Unknown if history completeness is unverified.
 The Issue and Link OLAP tables paginate all slices; issues may belong to
 several component slices while their overall count remains unique. Lifecycle
 uses the Jira resolution date, and link totals count directed records.
-The Event-Driven Analytics section is marked **under work**. Cross-Linkage
-classifies link records into four categories; unavailable unblock
-timing is N/A, duplicate elapsed time is calendar time rather than logged effort,
-and associations do not prove causation. The OLAP
-analyser also emits a cross-linkage cube (`jira_data_cube_crosslink.csv`).
-See [`skills_manifest.md`](skills_manifest.md) for the full specification.
+The OLAP analyser emits a cross-linkage cube
+(`jira_data_cube_crosslink.csv`) and a console summary from the classified
+link records. See [`skills_manifest.md`](skills_manifest.md) for the full
+specification.
 
 ```bash
 # Generate dashboard + OLAP cube for the project alias from .env

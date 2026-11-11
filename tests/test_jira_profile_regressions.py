@@ -1,8 +1,9 @@
 import json
 import unittest
 
+# [P25] compute_event_analytics tests were removed together with the
+# Event-Driven Analytics section; the cross-linkage module stays (OLAP cube).
 from lib.compute_crosslink import compute_cross_linkage
-from lib.compute_events import compute_event_analytics
 from lib.compute_profile import compute_jira_profile
 from lib.sync_jira import sync_jira
 
@@ -44,35 +45,6 @@ class ProfileRegressions(unittest.TestCase):
         self.assertEqual(result["olap_rows"][0]["components"], ["first", "second"])
         self.assertEqual(result["olap_rows"][0]["life"], 5)
 
-    def test_parent_unknown_and_open_child_not_stuck(self):
-        rows = [issue("p"), issue("c", type="Sub-task", parent_key="p",
-                                 status="Open"),
-                issue("b", type="Sub-bug", parent_key="p")]
-        result = compute_event_analytics(rows, ["", "", ""])
-        self.assertEqual(result["module1"]["module1c"]["distribution"][0]["status"],
-                         "Unknown")
-        self.assertIsNone(result["module1"]["module1b"]["stuck_count"])
-        self.assertTrue(result["module1"]["module1b"]["na"])
-
-    def test_known_parent_and_complete_child_snapshot(self):
-        snapshot = "2025-01-03T00:00:00Z"
-        common = {"status_history_complete": True, "jira_snapshot_at": snapshot}
-        parent = issue("p", subtask_keys_json='["c","b"]', **common)
-        child = issue("c", type="Sub-task", parent_key="p", status="Done", **common)
-        defect = issue("b", type="Sub-bug", parent_key="p", status="Done",
-                       created="2025-01-01T02:00:00Z", **common)
-        rows = [parent, child, defect]
-        docs = [history(("2025-01-01T03:00:00Z", "Open", "Doing"),
-                        ("2025-01-01T04:00:00Z", "Doing", "Open")),
-                history(("2025-01-02T00:00:00Z", "Open", "Done")),
-                history(("2025-01-02T00:00:00Z", "Open", "Done"))]
-        result = compute_event_analytics(rows, docs)
-        self.assertEqual(result["module1"]["module1c"]["distribution"][0]["status"], "Open")
-        self.assertEqual(result["module1"]["module1b"]["stuck_count"], 1)
-        self.assertEqual(result["module1"]["module1b"]["stuck"][0]["latency_hrs"], 24)
-        child["status"] = "Open"
-        self.assertTrue(compute_event_analytics(rows, docs)["module1"]["module1b"]["na"])
-
     def test_snapshot_and_discontinuous_history(self):
         row = issue("1", status="Done", status_history_complete=True,
                     jira_snapshot_at="2025-01-01T04:00:00Z")
@@ -99,12 +71,6 @@ class ProfileRegressions(unittest.TestCase):
         result = compute_jira_profile(rows, docs)["backlog_stagnation"]
         self.assertEqual((result["total"], result["unknown"]), (1, 1))
         self.assertIsNone(compute_jira_profile([issue("3")], [""])["backlog_stagnation"]["total"])
-
-    def test_incomplete_history_is_not_zero_pingpong(self):
-        rows = [issue(str(i), labels="x") for i in range(3)]
-        result = compute_event_analytics(rows, ["", "", ""])
-        self.assertIsNone(result["module3"]["baseline"]["pingpong"])
-        self.assertIsNone(result["module3"]["cohorts"][0]["pingpong"])
 
     def test_escaped_defect_uses_distinct_issues_and_deduplicates(self):
         outward = {"type": "Causes", "direction": "outward", "outward": "causes",

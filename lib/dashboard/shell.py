@@ -24,7 +24,6 @@ def _render_html_shell(ctx):
     total = ctx['total']
     velocity = ctx['velocity']
     weeks = ctx['weeks']
-    module3_js = ctx['module3_js']
     tab1_assets_mtime = ctx['tab1_assets_mtime']
     tab1_assets_size_mb = ctx['tab1_assets_size_mb']
     tab1_total_size_mb = ctx['tab1_total_size_mb']
@@ -42,7 +41,6 @@ def _render_html_shell(ctx):
     cfd_done = ctx['cfd_done']
     cfd_ip = ctx['cfd_ip']
     cfd_weeks = ctx['cfd_weeks']
-    cl_dist_js = ctx['cl_dist_js']
     control_chart_html = ctx['control_chart_html']
     db_path = ctx['db_path']
     db_size_mb = ctx['db_size_mb']
@@ -52,7 +50,6 @@ def _render_html_shell(ctx):
     link_caps = ctx['link_caps']
     link_kt = ctx['link_kt']
     link_vision = ctx['link_vision']
-    module1_js = ctx['module1_js']
     olap_link_rows_json = ctx['olap_link_rows_json']
     olap_rows_json = ctx['olap_rows_json']
     opened2 = ctx['opened2']
@@ -472,8 +469,7 @@ def _render_html_shell(ctx):
             jm, cfd_weeks, cfd_done, cfd_ip, cfd_backlog,
             week2_labels, opened2, resolved2, velocity2, scope_change2,
             week_labels, bug_new, bug_res, trend_js, tis_js,
-            module1_js, module3_js, cl_dist_js, olap_rows_json,
-            olap_link_rows_json)
+            olap_rows_json, olap_link_rows_json)
         + trends_data.build_trends_data(jm, _json)
         + derive.DERIVE_JS
         + settings_widget.WIDGET_JS

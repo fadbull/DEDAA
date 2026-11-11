@@ -5,8 +5,7 @@ from ..dashboard_helpers import js_list
 def build_scripts_part1(jm, cfd_weeks, cfd_done, cfd_ip, cfd_backlog,
                         week2_labels, opened2, resolved2, velocity2,
                         scope_change2, week_labels, bug_new, bug_res,
-                        trend_js, tis_js, module1_js, module3_js,
-                        cl_dist_js, olap_rows_json, olap_link_rows_json):
+                        trend_js, tis_js, olap_rows_json, olap_link_rows_json):
     return ("""
 <script>
 function switchTab(n){
@@ -64,11 +63,6 @@ new Chart(document.getElementById('bugPrioChart'), { type:'doughnut', data:{
 """ + trend_js + """
 // ---- Tab 3: Time-in-Status charts ----
 """ + tis_js + """
-// ---- Tab 3: Event-Driven Analytics charts ----
-""" + module1_js + """
-""" + module3_js + """
-// ---- Tab 3: Jira Cross-Linkage & SDLC Waste charts ----
-""" + cl_dist_js + """
 // ---- Tab 3: OLAP Slice & Dice constructor ----
 var OLAP_ROWS = """ + olap_rows_json + """;
 var OLAP_PAGE_SIZE = 200, olapPageIndex = 0, olapLinkPageIndex = 0;

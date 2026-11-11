@@ -9,15 +9,16 @@ from ..dashboard_helpers import (esc, js_list, json_str, _tip,
 from ..chromadb_utils import dir_size_mb, collection_folder
 from .shell import _render_html_shell
 
+# [P25] The event_analytics parameter was removed together with the
+# Event-Driven Analytics section; cross_linkage stays (OLAP cube data).
 def build_dashboard(jm, product_pages, db_path, reports_data=None,
-                    artifacts=None, jprofile=None, event_analytics=None,
+                    artifacts=None, jprofile=None,
                     cross_linkage=None, collection_map=None, output_path=None,
                     metric_settings=None):
     import os
     reports_data = reports_data or {}
     artifacts = artifacts or {}
     jprofile = jprofile or {}
-    event_analytics = event_analytics or {}
     cross_linkage = cross_linkage or {}
     # Directory containing the generated HTML (used to resolve asset paths).
     out_dir = os.path.dirname(os.path.abspath(output_path)) if output_path else os.getcwd()
@@ -784,323 +785,8 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
                   "<ul class='text-xs'>" + sec_rows + "</ul>")
 
     # ==================================================================
-    # EVENT-DRIVEN ANALYTICS (Tab 3) — advanced event/trigger analysis
+    # SDLC PROCESS MATRIX (Tab 2, section m-sdlc) — kept (NOT section 7).
     # ==================================================================
-    import json as _event_json
-    ev_m1 = event_analytics.get("module1", {})
-    ev_m2 = event_analytics.get("module2", {})
-    ev_m3 = event_analytics.get("module3", {})
-
-    # --- Module 1: Jira Defect Causality & SDLC Triggers -------------------
-    # Three sub-widgets: (a) Story Status at Defect Birth, (b) Parent-Child
-    # Closure Sync Tracker, (c) Sub-Bug Creation Constraints Validation.
-    m1a = ev_m1.get("module1a", {})
-    m1b = ev_m1.get("module1b", {})
-    m1c = ev_m1.get("module1c", {})
-
-    # --- Widget (a): Story Status at Defect Birth (Doughnut) ---
-    m1a_dist = m1a.get("distribution_pct", [])
-    if m1a.get("na"):
-        module1a_html = ("<div class='widget'><h3 class='font-medium mb-2'>"
-                         "Story Status at Defect Birth" +
-                         _tip("Shows the status at defect creation for a parent or a uniquely linked Story/Task. A link is an association, not proof of causation. Unknown means the parent's history is not known to be complete.") +
-                         "</h3><div class='na-box'>N/A — no resolvable defect-parent links</div></div>")
-        module1a_js = ""
-    else:
-        m1a_labels = _event_json.dumps([d["status"] for d in m1a_dist])
-        m1a_counts = _event_json.dumps([d["count"] for d in m1a_dist])
-        m1a_colors = _event_json.dumps(
-            ["#2563eb", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4",
-             "#f97316", "#14b8a6", "#6366f1", "#ec4899"][:max(1, len(m1a_dist))])
-        module1a_html = (
-            "<div class='widget'><h3 class='font-medium mb-2'>Story Status at "
-            "Defect Birth" +
-            _tip("Shows the status at defect creation for a parent or a uniquely linked Story/Task. A link is an association, not proof of causation. Unknown means the parent's history is not known to be complete.") +
-            "</h3>"
-            f"<p class='text-xs text-gray-500 mb-2'>Defects with a resolvable "
-            f"parent: <strong>{m1a.get('with_parent', 0)}</strong> of "
-            f"{m1a.get('total_bugs', 0)}</p>"
-            "<div style='height:280px'><canvas id='evM1Doughnut'></canvas></div>"
-            "</div>")
-        module1a_js = (
-            "var ctxM1=document.getElementById('evM1Doughnut');"
-            "if(ctxM1){new Chart(ctxM1,{type:'doughnut',"
-            "data:{labels:" + m1a_labels + ",datasets:[{data:" + m1a_counts + ","
-            "backgroundColor:" + m1a_colors + "}]},"
-            "options:{responsive:true,maintainAspectRatio:false,"
-            "plugins:{legend:{position:'right'},tooltip:{"
-            "callbacks:{label:function(c){var t=c.label||'';var v=c.parsed||0;"
-            "var tot=c.dataset.data.reduce(function(a,b){return a+b;},0);"
-            "var p=tot?Math.round(v/tot*100):0;return t+' ('+p+'%) — '+v+' defects';}}}}}});}")
-
-    # --- Widget (b): Parent-Child Closure Sync Tracker (stuck-parents table) --
-    m1b_stuck = m1b.get("stuck", [])
-    m1b_stuck_rows = "".join(
-        "<tr>"
-        f"<td class='py-1'>{esc(r.get('type'))}</td>"
-        f"<td class='py-1'><a class='text-blue-600' href='{esc(r.get('url'))}' "
-        f"target='_blank'>{esc(r.get('key'))}</a></td>"
-        f"<td class='py-1'>{esc(r.get('status'))}</td>"
-        f"<td class='py-1 text-right font-mono'>{r.get('latency_hrs', 0)} h</td>"
-        "</tr>"
-        for r in m1b_stuck) or "<tr><td colspan='4'>None</td></tr>"
-    m1b_description = (
-        "N/A — a complete child set, complete status histories and a common Jira snapshot time are required."
-        if m1b.get("na") else
-        str(m1b.get("stuck_count")) + " parents had no subsequent status transition after all known children closed."
-    )
-    module1b_html = (
-        "<div class='widget'><h3 class='font-medium mb-2'>Parent-Child Closure "
-        "Sync Tracker — Stuck Parents" +
-        _tip("Uses the final entry into a closed status for each child, complete histories, a complete child set and a common Jira snapshot time. An open parent with no subsequent status transition is an observation, not proof of a stalled workflow. Latency ends at the snapshot, not today.") +
-        "</h3>"
-        "<p class='text-xs text-gray-500 mb-3'>" + m1b_description +
-        " Unknown parents: " + str(m1b.get("unknown_count", 0)) + ".</p>"
-        "<div class='overflow-x-auto'><table class='w-full text-sm'>"
-        "<thead><tr class='text-left border-b'><th class='py-2'>Issue Type (Parent)</th>"
-        "<th>Issue</th><th>Parent Status</th><th class='text-right'>Latency (h)</th>"
-        "</tr></thead><tbody>" + m1b_stuck_rows + "</tbody></table></div></div>")
-    module1b_js = ""
-
-    # --- Widget (c): Sub-Bug Creation Constraints Validation (data grid) ---
-    m1c_dist = m1c.get("distribution", [])
-    if m1c.get("na"):
-        module1c_html = ("<div class='widget'><h3 class='font-medium mb-2'>"
-                         "Sub-Bug Creation Constraints Validation" +
-                         _tip("For every [Story/Task/Bug → Sub-Bug] pair, captures the parent's status at the exact second the Sub-Bug was created. Tests the hypothesis that Sub-Bugs are only created while the parent is in 'In Testing' (100%).") +
-                         "</h3><div class='na-box'>N/A — no Sub-Bug pairs found</div></div>")
-        module1c_js = ""
-    else:
-        it_pct = m1c.get("in_testing_pct")
-        has_unknown = any(d["status"] == "Unknown" for d in m1c_dist)
-        hypothesis_ok = it_pct == 100.0 and not has_unknown
-        verdict = ("✅ Hypothesis CONFIRMED — Sub-Bugs are created only while "
-                   "the parent is In Testing."
-                   if hypothesis_ok else
-                   "N/A — parent status history is incomplete."
-                   if has_unknown and all(d["status"] in ("Unknown", "In Testing") for d in m1c_dist) else
-                   "⚠️ Hypothesis REJECTED — Sub-Bugs are also created while "
-                   "the parent is in other statuses.")
-        dist_rows = "".join(
-            f"<tr><td class='py-1'>{esc(d['status'])}</td>"
-            f"<td class='py-1 text-right font-mono'>{d['pct']}%</td>"
-            f"<td class='py-1 text-right font-mono'>{d['count']}</td></tr>"
-            for d in m1c_dist) or "<tr><td colspan='3'>N/A</td></tr>"
-        module1c_html = (
-            "<div class='widget'><h3 class='font-medium mb-2'>Sub-Bug Creation "
-            "Constraints Validation" +
-            _tip("For every [Story/Task/Bug → Sub-Bug] pair, captures the parent's status at the exact second the Sub-Bug was created. Tests the hypothesis that Sub-Bugs are only created while the parent is in 'In Testing' (100%).") +
-            "</h3>"
-            "<p class='text-xs text-gray-500 mb-2'>Is it true that a Sub-Bug is "
-            "created only when the parent is in <strong>In Testing</strong>?</p>"
-            "<p class='text-sm mb-3'>" + verdict + "</p>"
-            "<table class='w-full text-sm'><thead><tr class='text-left border-b'>"
-            "<th class='py-2'>Parent status at Sub-Bug creation</th><th>%</th>"
-            "<th>Count</th></tr></thead><tbody>" + dist_rows + "</tbody></table>"
-            "<p class='text-xs text-gray-500 mt-2'>Pairs analyzed: <strong>" +
-            str(m1c.get("total_pairs", 0)) + "</strong> · In Testing: <strong>" +
-            (str(it_pct) + "%" if it_pct is not None else "N/A") +
-            "</strong> of known statuses · Known: " +
-            str(m1c.get("known_pairs", 0)) + "</p></div>")
-        module1c_js = ""
-
-    module1_html = module1a_html + module1b_html + module1c_html
-    module1_js = module1a_js + module1b_js + module1c_js
-
-    # --- Module 3: Bubble chart — labels vs cycle time / ping-pong ---
-    m3_base = ev_m3.get("baseline", {})
-    m3_cohorts = [c for c in ev_m3.get("cohorts", [])
-                  if c.get("cycle_days") is not None and c.get("pingpong") is not None]
-    m3_risk = ev_m3.get("risk_labels", [])
-    if not m3_cohorts:
-        module3_html = ("<div class='widget'><h3 class='font-medium mb-2'>"
-                        "Metadata Impact (Labels & Custom Fields)" +
-                        _tip("Splits issues into cohorts by label (labels appearing in ≥3 issues only), computing each cohort's median cycle time and ping-pong (rework) rate versus the project baseline.") +
-                        "</h3><div class='na-box'>N/A — no label cohorts with "
-                        "known cycle time and complete status history</div></div>")
-        module3_js = ""
-    else:
-        m3_bubbles = []
-        for c in m3_cohorts:
-            m3_bubbles.append({
-                "x": c.get("cycle_days") or 0,
-                "y": c.get("pingpong") or 0,
-                "r": max(4, min(24, (c.get("count") or 1) * 1.2)),
-                "label": c.get("label"),
-                "count": c.get("count"),
-                "risk": c.get("risk", False),
-            })
-        m3_bubbles_json = _event_json.dumps(m3_bubbles)
-        m3_base_x = m3_base.get("cycle_days")
-        m3_base_y = m3_base.get("pingpong")
-        risk_block = ""
-        if m3_risk:
-            risk_block = (
-                "<div class='widget' style='border-color:#fecaca;background:#fef2f2'>"
-                "<h3 class='font-medium mb-2 text-red-700'>⚠️ High Risk Scope "
-                "Detected</h3><ul class='list-disc pl-5 text-sm text-red-800'>" +
-                "".join(f"<li>{esc(lab)}</li>" for lab in m3_risk) +
-                "</ul><p class='text-xs text-gray-500 mt-2'>These label cohorts "
-                "sit above the project baseline in BOTH median cycle time and "
-                "ping-pong (rework) rate.</p></div>")
-        m3_base_x_s = f"{m3_base_x}d" if m3_base_x is not None else "N/A"
-        m3_base_y_s = f"{m3_base_y}" if m3_base_y is not None else "N/A"
-        module3_html = (
-            "<div class='widget'><h3 class='font-medium mb-2'>Metadata Impact "
-            "(Labels & Custom Fields)" +
-            _tip("Splits issues into cohorts by label (labels appearing in ≥3 issues only), computing each cohort's median cycle time and ping-pong (rework) rate versus the project baseline. Cohorts above baseline in BOTH dimensions are flagged High Risk Scope.") +
-            "</h3>"
-            "<p class='text-xs text-gray-500 mb-2'>Baseline (no label): "
-            "median cycle <strong>" + m3_base_x_s +
-            "</strong> · ping-pong <strong>" + m3_base_y_s +
-            "</strong> per issue. Bubble size = issue count.</p>"
-            "<div style='height:320px'><canvas id='evM3Bubble'></canvas></div>"
-            "<div class='mt-3'>" + risk_block + "</div></div>")
-        module3_js = (
-            "var ctxM3=document.getElementById('evM3Bubble');"
-            "if(ctxM3){var bubbles=" + m3_bubbles_json + ";"
-            "new Chart(ctxM3,{type:'bubble',"
-            "data:{datasets:[{label:'Label cohorts',data:bubbles,"
-            "backgroundColor:function(ctx){return ctx.raw&&ctx.raw.risk?"
-            "'rgba(239,68,68,0.6)':'rgba(37,99,235,0.6)';},"
-            "borderColor:function(ctx){return ctx.raw&&ctx.raw.risk?'#dc2626':'#2563eb';}"
-            "}]},"
-            "options:{responsive:true,maintainAspectRatio:false,"
-            "scales:{x:{title:{display:true,text:'Median Cycle Time (days)'}},"
-            "y:{title:{display:true,text:'Ping-Pong Count per Issue'}}},"
-            "plugins:{tooltip:{callbacks:{label:function(c){var r=c.raw;"
-            "return r.label+' ('+r.count+' issues) — cycle '+r.x+'d, ping-pong '+r.y;}}}"
-            "}}});}")
- 
-    # ==================================================================
-    # JIRA CROSS-LINKAGE & SDLC WASTE (Tab 3) — issuelinks 4-category
-    # ==================================================================
-    cl_summary = cross_linkage.get("summary", {})
-    cl_total = cross_linkage.get("total_links", 0)
-    cl_a = cross_linkage.get("category_a", {})
-    cl_b = cross_linkage.get("category_b", {})
-    cl_c = cross_linkage.get("category_c", {})
-    cl_d = cross_linkage.get("category_d", {})
-
-    # Per-category colors
-    cl_colors = {"A": "#ef4444", "B": "#f59e0b", "C": "#8b5cf6", "D": "#06b6d4"}
-    cl_names = {"A": "A · Hard Blockers", "B": "B · Process Rework",
-                "C": "C · Scope Duplication", "D": "D · Soft Associations"}
-
-    # --- Callout cards per category (N/A if category absent) ---
-    def _cl_callout(cat, title, subtitle, body_html):
-        col = cl_colors[cat]
-        return ("<div class='widget' style='border-left:4px solid " + col + ";'>"
-                "<div class='flex items-center justify-between mb-1'>"
-                "<h3 class='font-medium'>" + title + "</h3>"
-                "<span class='text-xs font-mono px-2 py-0.5 rounded-full' "
-                "style='background:" + col + "22;color:" + col + "'>" +
-                str(cl_summary.get(cat, 0)) + " links</span></div>"
-                "<p class='text-xs text-gray-500 mb-2'>" + subtitle + "</p>"
-                + body_html + "</div>")
-
-    # Category A callout
-    if cl_a.get("na"):
-        cl_a_html = _cl_callout("A", "Hard Blockers", "blocks / is blocked by / Depend",
-                                "<div class='na-box'>N/A — no hard blocker links</div>")
-    else:
-        a_rate = cl_a.get("blocker_stagnation_rate")
-        a_rate_s = f"{a_rate}%" if a_rate is not None else "N/A"
-        a_react = cl_a.get("avg_reaction_hrs")
-        a_react_s = (f"{a_react} h" if a_react is not None else "N/A")
-        cl_a_html = _cl_callout(
-            "A", "Hard Blockers", "Blocker reaction & stagnation",
-            "<table class='w-full text-sm'><tbody>"
-            "<tr><td class='py-1'>Blocker reaction (avg)</td>"
-            "<td class='text-right font-mono'>" + a_react_s + "</td></tr>"
-            "<tr><td class='py-1'>Stagnation rate (>24h)</td>"
-            "<td class='text-right font-mono'>" + a_rate_s + "</td></tr>"
-            "<tr><td class='py-1'>Stagnant blockers</td>"
-            "<td class='text-right font-mono'>" + (str(cl_a["stagnant_count"]) if cl_a.get("stagnant_count") is not None else "N/A") +
-            "</td></tr></tbody></table>")
-
-    # Category B callout
-    if cl_b.get("na"):
-        cl_b_html = _cl_callout("B", "Process Rework", "causes / is caused by",
-                                "<div class='na-box'>N/A — no cause/rework links</div>")
-    else:
-        cl_b_html = _cl_callout(
-            "B", "Process Rework", "Escaped defects (cause after source closed)",
-            "<table class='w-full text-sm'><tbody>"
-            "<tr><td class='py-1'>Escaped causes</td>"
-            "<td class='text-right font-mono'>" + (str(cl_b["escaped_causes"]) if cl_b.get("escaped_causes") is not None else "N/A") +
-            "</td></tr>"
-            "<tr><td class='py-1'>Eligible unique pairs</td>"
-            "<td class='text-right font-mono'>" +
-            str(cl_b.get("eligible_pairs", 0)) +
-            "</td></tr></tbody></table>")
-
-    # Category C callout
-    if cl_c.get("na"):
-        cl_c_html = _cl_callout("C", "Scope Duplication", "duplicates / clones / Cloners",
-                                "<div class='na-box'>N/A — no duplication links</div>")
-    else:
-        cl_c_html = _cl_callout(
-            "C", "Scope Duplication", "Elapsed time for issues resolved as duplicates",
-            "<table class='w-full text-sm'><tbody>"
-            "<tr><td class='py-1'>Elapsed calendar days</td>"
-            "<td class='text-right font-mono'>" + (str(cl_c["elapsed_days"]) if cl_c.get("elapsed_days") is not None else "N/A") +
-            "</td></tr>"
-            "<tr><td class='py-1'>Closed as duplicate</td>"
-            "<td class='text-right font-mono'>" + str(cl_c.get("closed_duplicates", 0)) +
-            "</td></tr></tbody></table>")
-
-    # Category D callout
-    if cl_d.get("na"):
-        cl_d_html = _cl_callout("D", "Soft Associations", "relates to / Related To / Part of",
-                                "<div class='na-box'>N/A — no soft-association links</div>")
-    else:
-        d_sync = cl_d.get("sync_ratio")
-        d_sync_s = f"{d_sync}%" if d_sync is not None else "N/A"
-        cl_d_html = _cl_callout(
-            "D", "Soft Associations", "Closure sync matrix",
-            "<table class='w-full text-sm'><tbody>"
-            "<tr><td class='py-1'>Same-month closure</td>"
-            "<td class='text-right font-mono'>" + (str(cl_d["in_same_month"]) if cl_d.get("in_same_month") is not None else "N/A") +
-            "</td></tr>"
-            "<tr><td class='py-1'>Closure sync ratio</td>"
-            "<td class='text-right font-mono'>" + d_sync_s + "</td></tr>"
-            "<tr><td class='py-1'>Spread closures</td>"
-            "<td class='text-right font-mono'>" + (str(cl_d["spread"]) if cl_d.get("spread") is not None else "N/A") +
-            "</td></tr></tbody></table>")
-
-    # --- Doughnut: category distribution ---
-    cl_dist_labels = _event_json.dumps([cl_names[c] for c in "ABCD"])
-    cl_dist_counts = _event_json.dumps([cl_summary.get(c, 0) for c in "ABCD"])
-    cl_dist_colors = _event_json.dumps([cl_colors[c] for c in "ABCD"])
-    cl_dist_js = (
-        "var ctxCL=document.getElementById('clDoughnut');"
-        "if(ctxCL){new Chart(ctxCL,{type:'doughnut',"
-        "data:{labels:" + cl_dist_labels + ",datasets:[{data:" + cl_dist_counts +
-        ",backgroundColor:" + cl_dist_colors + "}]},"
-        "options:{responsive:true,maintainAspectRatio:false,"
-        "plugins:{legend:{position:'right'},tooltip:{"
-        "callbacks:{label:function(c){var t=c.label||'';var v=c.parsed||0;"
-        "var tot=c.dataset.data.reduce(function(a,b){return a+b;},0);"
-        "var p=tot?Math.round(v/tot*100):0;return t+' ('+p+'%) — '+v+' links';}}}}}});}")
-
-    crosslink_widget_html = """
-      <div class="widget">
-        <h3 class="font-medium mb-2">Jira Cross-Linkage & SDLC Waste Dashboard""" + _tip("Category counts are directed issue-link records and may include both ends of a link. A: unblock timing is unavailable without link history. B: unique directed causes links to bugs created after the source resolution, when both dates and link labels are known; association is not proof of causation. C: elapsed calendar days between recorded In Progress and Done for issues resolved as Duplicate; this is not logged effort. D: percentage of eligible link records with first recorded Done or resolution dates in the same calendar month.") + """</h3>
-        <p class="text-xs text-gray-500 mb-3">Classified <strong>""" + str(cl_total) + """</strong> issue
-        links across all issues into 4 macro-categories of SDLC waste.</p>
-        <div class="grid md:grid-cols-2 gap-4">
-          <div style="height:260px"><canvas id="clDoughnut"></canvas></div>
-          <div>""" + cl_a_html + """</div>
-        </div>
-        <div class="grid md:grid-cols-3 gap-4 mt-4">
-          """ + cl_b_html + """
-          """ + cl_c_html + """
-          """ + cl_d_html + """
-        </div>
-      </div>
-    """
-
     sdlc_section_html = """
       <section id="m-sdlc" class="scroll-mt-24">
         <h2 class="text-lg font-semibold mb-3">SDLC Process Matrix — Issue Type vs Status Dependencies</h2>
@@ -1112,30 +798,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         </div>
       </section>
     """
-
-    event_section_html = """
-       <section id="d-events" class="scroll-mt-24">
-         <h2 class="text-lg font-semibold mb-3">7. Event-Driven Analytics (under work)</h2>
-         <p class="text-xs text-gray-500 mb-3">Advanced event analysis: defect
-         associations (story status at defect birth, parent-child closure sync,
-         sub-bug creation constraints), the impact of labels / custom fields on
-         cycle time and rework, and the Jira Cross-Linkage & SDLC Waste
-         classifier.</p>
-         <div class="grid md:grid-cols-2 gap-4">
-           """ + module1a_html + """
-           """ + module1c_html + """
-         </div>
-         <div class="mt-4">
-           """ + module1b_html + """
-         </div>
-         <div class="mt-4">
-           """ + module3_html + """
-         </div>
-         <div class="mt-4">
-           """ + crosslink_widget_html + """
-         </div>
-       </section>
-     """
 
     tab3_html = """
 <!-- ================= TAB 3 ================= -->
@@ -1152,7 +814,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         <a href="#d-transitions" class="sidebar-link block px-3 py-2 rounded-lg">4. Transition Frequency</a>
         <a href="#d-timestatus" class="sidebar-link block px-3 py-2 rounded-lg">5. Time-in-Status</a>
         <a href="#d-olap" class="sidebar-link block px-3 py-2 rounded-lg">6. OLAP Slice & Dice</a>
-        <a href="#d-events" class="sidebar-link block px-3 py-2 rounded-lg">7. Event-Driven Analytics (under work)</a>
       </div>
     </nav>
     <div class="flex-1 space-y-8">
@@ -1292,8 +953,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
         </div>
       </section>
 
-      """ + event_section_html + """
-
     </div>
   </div>
 </div>
@@ -1308,7 +967,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     ctx['total'] = total
     ctx['velocity'] = velocity
     ctx['weeks'] = weeks
-    ctx['module3_js'] = module3_js
     ctx['tab1_assets_mtime'] = tab1_assets_mtime
     ctx['tab1_assets_size_mb'] = tab1_assets_size_mb
     ctx['tab1_total_size_mb'] = tab1_total_size_mb
@@ -1326,7 +984,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     ctx['cfd_done'] = cfd_done
     ctx['cfd_ip'] = cfd_ip
     ctx['cfd_weeks'] = cfd_weeks
-    ctx['cl_dist_js'] = cl_dist_js
     ctx['control_chart_html'] = control_chart_html
     ctx['db_path'] = db_path
     ctx['db_size_mb'] = db_size_mb
@@ -1337,7 +994,6 @@ def build_dashboard(jm, product_pages, db_path, reports_data=None,
     ctx['link_caps'] = link_caps
     ctx['link_kt'] = link_kt
     ctx['link_vision'] = link_vision
-    ctx['module1_js'] = module1_js
     ctx['olap_link_rows_json'] = olap_link_rows_json
     ctx['olap_rows_json'] = olap_rows_json
     ctx['opened2'] = opened2

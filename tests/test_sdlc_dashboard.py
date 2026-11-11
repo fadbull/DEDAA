@@ -71,7 +71,11 @@ class SdlcDashboardTests(unittest.TestCase):
         self.assertEqual(len(tree.ids["m-sdlc"]), 1)
         self.assertIn("m-sdlc", tree.links)
         headings = [text for _, _, text in tree.headings]
-        self.assertIn("7. Event-Driven Analytics (under work)", headings)
+        # [P25] The Event-Driven Analytics section (and its sidebar link)
+        # was removed — no heading, no #d-events anchor anywhere.
+        self.assertNotIn("7. Event-Driven Analytics (under work)", headings)
+        self.assertNotIn('href="#d-events"', html)
+        self.assertNotIn("d-events", tree.ids)
         self.assertNotIn("Assignee → Component (Ownership)", html)
         self.assertNotIn("Reporter → Priority (Escalation)", html)
         self.assertIn("Value Stream Mapping Gaps (under work)", html)
@@ -80,8 +84,9 @@ class SdlcDashboardTests(unittest.TestCase):
         self.assertIn("including missing statuses", html)
         self.assertIn("not evidence of neglect", html)
         self.assertIn("yellow at or below 0.2, green above 0.2", html)
+        # [P25] "d-events" removed together with the Event-Driven section.
         self.assertFalse(any(len(entries) > 1 for key, entries in tree.ids.items()
-                             if key in {"m-sdlc", "d-events"}))
+                             if key in {"m-sdlc"}))
         self.assertEqual(len(re.findall(r'href="#m-sdlc"', html)), 1)
 
     def test_subbug_indicator_at_threshold_and_without_stories(self):
