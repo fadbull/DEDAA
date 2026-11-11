@@ -273,11 +273,28 @@ Periods selector (Daily / Weekly / Sprint / Monthly / Quarterly / Annual), the
 dimension selector (project / team / component / epic / person), an Issue Type
 filter, and two settings levels (Widget settings + Metric settings, persisted
 to `localStorage['dedaa_metric_settings']`). The Issue Type filter is not a
-dimension split. By default, every metric uses the same contiguous five-period
-window ending at the project's latest active two-week period. The Sprint
-option currently always uses fixed two-week ISO buckets, not actual Jira
-sprint boundaries, even when sprint fields are present. The selected
-granularity and calendar range apply consistently across metrics. Team
+dimension split. The common period resolver in `lib/dashboard/granularity.py`
+uses Widget `sprintData=auto|available|none`: Auto selects actual Jira sprints
+only when more than 50% of all project issues have a populated Sprint field
+(including undated values), independently of dimension/type/date filters.
+Available forces actual sprints; none, or Auto below the threshold, uses
+two-week ISO calendar buckets. `lib/jira_sprints.py` normalizes new structured
+sync metadata and legacy text caches, preserving IDs, boards and exact dates.
+Closed sprint boundaries use completeDate, otherwise a valid endDate.
+No missing boundaries are invented.
+
+Real Sprint defaults to the latest five completed periods with Jira activity,
+or the metric's Default N. Manual dates select whole intersecting sprints;
+unfinished periods are partial, with snapshots bounded by available Jira
+data, and do not enter comparative trends. Actual Sprint IDs are retained
+through default-window selection, aggregation/state, snapshots and drilldown.
+Unassigned issues remain in calendar views; real-sprint views exclude them
+and unresolved/ambiguous memberships. Existing tooltips explain omissions;
+unavailable periods show N/A rather than synthetic real sprints.
+Calendar granularities retain their contiguous activity-anchored windows,
+and the separate Delivery CFD retains its calendar behavior.
+Widget/per-metric settings, anchors, units and type selections remain effective;
+manual ranges are remembered per metric and granularity. Team
 filtering uses the configured field or labels for every metric. The default
 production label `prod` matches production tokens, not unrelated words such
 as `product` or `non-prod`; custom labels remain configurable.
@@ -298,6 +315,12 @@ and insufficient data do not produce fabricated trend verdicts (`RC_WIN_STATE`
 keeps the chart, tooltip, avg-box, conclusion and settings panel describing
 the same filtered-window state). The widget displays Jira-derived
 measurements only; it does not establish an as-is assessment or baseline.
+
+Portable regression commands are documented in `README.md`: Python Sprint
+normalization/settings tests and Node runtime tests use synthetic data.
+Optional `DEDAA_DASHBOARDS` inputs execute regenerated local HTML and verify
+its period source, shared metric axes and independent Velocity accounting;
+the private dashboards are never required in a clean clone.
 
 ### 3.4 Event-Driven Analytics (Tab 3, section 8)
 

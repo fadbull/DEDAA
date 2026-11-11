@@ -1,0 +1,4428 @@
+{
+  "version": "1.0.0",
+  "date": "2026-11-11",
+  "widget": {
+    "name": "Process Metrics – Trends",
+    "description": "An interactive Jira-derived time-series widget with 20 metrics, common filters and issue drilldown.",
+    "scope": "This contract covers this widget only, not other dashboard areas.",
+    "metric_count": 20
+  },
+  "data_source": {
+    "system": "Jira",
+    "endpoints": [
+      {
+        "endpoint": "/rest/api/2/field",
+        "usage": "Discover field IDs, names and the Sprint custom field schema."
+      },
+      {
+        "endpoint": "/rest/api/2/search",
+        "usage": "Page issues with fields=*all and expand=renderedFields,changelog. Issue fields include the total time spent."
+      },
+      {
+        "endpoint": "Issue changelog pagination endpoint, when needed",
+        "usage": "Obtain remaining transition histories when the search expansion is truncated; the current sync does not independently page histories."
+      },
+      {
+        "endpoint": "Issue worklog endpoint, optional",
+        "usage": "Not called by the current sync or required by this widget when Jira's total time spent is available; individual rows are not used."
+      }
+    ],
+    "completeness": "Capture all issues in scope and all status transitions, including timestamp and source/destination, when available. Search expansion alone does not establish complete histories; the current code does not verify or fetch missing changelog pages. No completeness flag is currently displayed.",
+    "timestamps": "Preserve Jira ISO-8601 offsets at extraction. Sprint catalogue timestamps with offsets are normalized to UTC. The browser uses exact original field timestamps for real-Sprint anchors where available; status event timestamps are parsed as instants. Created is also truncated without offset and resolutiondate to date for existing calendar and duration paths; calendar bucket boundaries use browser-local dates. Do not assume a single timezone interpretation across these paths."
+  },
+  "issue_record": {
+    "description": "Normalized browser RC_RAW record. Every keyed issue has this shape; nullable or empty values represent absent signals.",
+    "fields": {
+      "key": {
+        "type": "string",
+        "required": true,
+        "description": "Jira issue key; joins the issue directory and derived records."
+      },
+      "type": {
+        "type": "string",
+        "required": true,
+        "description": "Jira issue type; Bug becomes Defect, Sub-Bug becomes Sub-bug and Sub-task is displayed as Sub-task."
+      },
+      "project": {
+        "type": "string",
+        "required": true,
+        "description": "Project identifier; missing values become Unknown."
+      },
+      "team": {
+        "type": "string",
+        "required": false,
+        "description": "First component-derived value; also used by the Component dimension."
+      },
+      "teams": {
+        "type": "array of strings",
+        "required": false,
+        "description": "Precomputed team signals; live Team selection resolves from fieldvals or labels instead."
+      },
+      "fieldvals": {
+        "type": "object mapping field name to string or null",
+        "required": false,
+        "description": "Discovered team field values by display name, read from issue text."
+      },
+      "epic": {
+        "type": "string",
+        "required": false,
+        "description": "Epic link, otherwise parent key, otherwise No Epic."
+      },
+      "person": {
+        "type": "string",
+        "required": false,
+        "description": "Assignee display value; missing assignees are grouped as unassigned."
+      },
+      "status": {
+        "type": "string",
+        "required": false,
+        "description": "Current issue status; compared case-insensitively with configured sets."
+      },
+      "created": {
+        "type": "string",
+        "required": false,
+        "description": "Creation timestamp truncated to the first 19 characters, without its offset; calendar derivation uses this value."
+      },
+      "resolutiondate": {
+        "type": "string",
+        "required": false,
+        "description": "Resolution date truncated to YYYY-MM-DD."
+      },
+      "created_ts": {
+        "type": "string",
+        "required": false,
+        "description": "Original Jira creation timestamp used as the precise Sprint membership anchor."
+      },
+      "resolved_ts": {
+        "type": "string",
+        "required": false,
+        "description": "Original Jira resolution timestamp used as the precise Sprint membership anchor."
+      },
+      "updated_ts": {
+        "type": "string",
+        "required": false,
+        "description": "Original Jira update timestamp used when determining the snapshot cutoff."
+      },
+      "has_sprint": {
+        "type": "boolean",
+        "required": true,
+        "description": "Whether the Sprint field was populated, including values without a usable identity or date."
+      },
+      "sprint_ids": {
+        "type": "array of strings",
+        "required": true,
+        "description": "Distinct Jira sprint IDs assigned to this issue, in observed order."
+      },
+      "labels": {
+        "type": "string",
+        "required": false,
+        "description": "Delimited Jira labels used for team membership, production and escape roles."
+      },
+      "priority": {
+        "type": "string",
+        "required": false,
+        "description": "Priority mapped to severity; an unmatched value becomes Minor."
+      },
+      "sp": {
+        "type": "number or null",
+        "required": false,
+        "description": "Story Points parsed from the issue text; absent or unparseable is null."
+      },
+      "timeSpent": {
+        "type": "number or null",
+        "required": false,
+        "description": "Issue total time spent in seconds; absent or unparseable is null."
+      },
+      "events": {
+        "type": "array of [timestamp, destination status] pairs",
+        "required": true,
+        "description": "Status transitions sorted chronologically; source status is not present in the browser record."
+      }
+    },
+    "extraction_history": "Store each status change with timestamp, original and destination names in chronological order. Current cache text preserves from/to; RC_RAW.events exposes only timestamp and destination.",
+    "issue_directory": {
+      "url": {
+        "type": "string",
+        "required": true,
+        "description": "Issue URL or empty string."
+      },
+      "type": {
+        "type": "string",
+        "required": true,
+        "description": "Issue type."
+      },
+      "summary": {
+        "type": "string",
+        "required": true,
+        "description": "Summary truncated to 120 characters."
+      },
+      "status": {
+        "type": "string",
+        "required": true,
+        "description": "Current status."
+      },
+      "created": {
+        "type": "string",
+        "required": true,
+        "description": "Creation date."
+      },
+      "updated": {
+        "type": "string",
+        "required": true,
+        "description": "Last updated date."
+      },
+      "days_in_status": {
+        "type": "number or null",
+        "required": true,
+        "description": "Whole days since the last captured transition; falls back to creation date or null."
+      }
+    },
+    "sprint_catalog": {
+      "fields": {
+        "id": "string sprint ID",
+        "name": "string display name",
+        "board": "string board ID or empty",
+        "state": "lowercase state",
+        "start": "UTC ISO timestamp or null",
+        "end": "planned UTC ISO timestamp or null",
+        "complete": "completion UTC ISO timestamp or null",
+        "finish": "effective end or null",
+        "closed": "boolean",
+        "usable": "boolean",
+        "conflict": "optional boolean for conflicting data"
+      },
+      "description": "Separate project-level catalogue; records with conflicting observations are unusable. Missing dates do not erase Sprint field presence."
+    },
+    "sprint_coverage": {
+      "total": "Number of keyed raw issues.",
+      "populated": "Number of raw issues with a populated Sprint field."
+    }
+  },
+  "settings": {
+    "widget": {
+      "statusSets.devStart": {
+        "type": "array of strings",
+        "default": [
+          "in progress"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "cycle, rework, clarcycle, cycletime, wip, floweff",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.done": {
+        "type": "array of strings",
+        "default": [
+          "closed",
+          "done",
+          "resolved",
+          "complete",
+          "completed",
+          "verified",
+          "released"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "lead, cycletime, wip, floweff, bugfix, defectdensity, reviewcycle",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.qaEntry": {
+        "type": "array of strings",
+        "default": [
+          "ready for qa",
+          "in testing",
+          "in qa",
+          "testing",
+          "qa"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "qa",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.qaExit": {
+        "type": "array of strings",
+        "default": [
+          "ready for demo",
+          "resolved",
+          "closed"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "qa",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.qaSet": {
+        "type": "array of strings",
+        "default": [
+          "ready for qa",
+          "in testing",
+          "in qa",
+          "testing",
+          "qa"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "leakage, defectdensity",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.ready": {
+        "type": "array of strings",
+        "default": [
+          "ready for development"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "backlog",
+        "layer": "widget",
+        "description": "Workflow status set. The only UI editor is in Backlog Health metric settings.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.backlog": {
+        "type": "array of strings",
+        "default": [
+          "new",
+          "open",
+          "to do",
+          "backlog",
+          "reopened",
+          "ready for development",
+          "ready for grooming",
+          "ready for demo",
+          "analysis",
+          "design"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "Referenced when selected as an anchor set.",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.refinement": {
+        "type": "array of strings",
+        "default": [
+          "new",
+          "open",
+          "to do",
+          "backlog",
+          "reopened",
+          "ready for grooming",
+          "refinement",
+          "requirements",
+          "backlog refinement",
+          "grooming"
+        ],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "rework, clarcycle",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "Used when no override is supplied."
+      },
+      "statusSets.review": {
+        "type": "array of strings",
+        "default": [],
+        "allowed_values": "Jira status names; comparisons are case-insensitive.",
+        "metrics": "reviewcycle",
+        "layer": "widget",
+        "description": "Workflow status set. Selected from observed workflow statuses.",
+        "runtime_default_note": "The project vocabulary may auto-seed review statuses containing review."
+      },
+      "types.delivery": {
+        "type": "array of strings",
+        "default": [
+          "Story",
+          "Task",
+          "Defect"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "throughput"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "types.req": {
+        "type": "array of strings",
+        "default": [
+          "Story",
+          "Task"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "cycle",
+          "rework"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "types.bug": {
+        "type": "array of strings",
+        "default": [
+          "Defect",
+          "Sub-bug"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "bugflow",
+          "escapereview"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "types.velocity": {
+        "type": "array of strings",
+        "default": [
+          "Story",
+          "Task",
+          "Defect"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "velocity"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "types.flow": {
+        "type": "array of strings",
+        "default": [
+          "Story",
+          "Task"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "flow"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "types.backlog": {
+        "type": "array of strings",
+        "default": [
+          "Story",
+          "Task"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "backlog"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "types.work": {
+        "type": "array of strings",
+        "default": [
+          "Story",
+          "Task",
+          "Defect",
+          "Sub-bug"
+        ],
+        "allowed_values": "Normalized Jira issue-type names.",
+        "metrics": [
+          "cycletime",
+          "floweff",
+          "qa",
+          "reviewcycle"
+        ],
+        "layer": "widget",
+        "description": "Named issue-type pool resolved by metrics that reference this alias."
+      },
+      "teamConfig.source": {
+        "type": "string",
+        "default": "none",
+        "allowed_values": [
+          "none",
+          "field",
+          "labels"
+        ],
+        "metrics": [
+          "cycle",
+          "rework",
+          "backlog",
+          "designreview",
+          "flow",
+          "cycletime",
+          "lead",
+          "velocity",
+          "throughput",
+          "wip",
+          "floweff",
+          "leakage",
+          "defectdensity",
+          "incident",
+          "bugflow",
+          "bugfix",
+          "qa",
+          "escapereview",
+          "clarcycle",
+          "reviewcycle"
+        ],
+        "layer": "widget",
+        "description": "Live team source."
+      },
+      "teamConfig.fieldName": {
+        "type": "string",
+        "default": "",
+        "allowed_values": "Discovered Jira team field names.",
+        "metrics": [
+          "cycle",
+          "rework",
+          "backlog",
+          "designreview",
+          "flow",
+          "cycletime",
+          "lead",
+          "velocity",
+          "throughput",
+          "wip",
+          "floweff",
+          "leakage",
+          "defectdensity",
+          "incident",
+          "bugflow",
+          "bugfix",
+          "qa",
+          "escapereview",
+          "clarcycle",
+          "reviewcycle"
+        ],
+        "layer": "widget",
+        "description": "Exact display name of the field used in field mode."
+      },
+      "teamConfig.labels": {
+        "type": "array of strings",
+        "default": [],
+        "allowed_values": "Observed labels.",
+        "metrics": [
+          "cycle",
+          "rework",
+          "backlog",
+          "designreview",
+          "flow",
+          "cycletime",
+          "lead",
+          "velocity",
+          "throughput",
+          "wip",
+          "floweff",
+          "leakage",
+          "defectdensity",
+          "incident",
+          "bugflow",
+          "bugfix",
+          "qa",
+          "escapereview",
+          "clarcycle",
+          "reviewcycle"
+        ],
+        "layer": "widget",
+        "description": "Selected labels used as team names in labels mode."
+      },
+      "prodLabel": {
+        "type": "string",
+        "default": "prod",
+        "allowed_values": "Jira label token.",
+        "metrics": [
+          "leakage",
+          "incident",
+          "defectdensity"
+        ],
+        "layer": "widget",
+        "description": "Default prod matches prod, prod_ and prod- prefixes and production, case-insensitively; a metric override can win."
+      },
+      "sprintData": {
+        "type": "string",
+        "default": "auto",
+        "allowed_values": [
+          "auto",
+          "available",
+          "none"
+        ],
+        "metrics": [
+          "cycle",
+          "rework",
+          "backlog",
+          "designreview",
+          "flow",
+          "cycletime",
+          "lead",
+          "velocity",
+          "throughput",
+          "wip",
+          "floweff",
+          "leakage",
+          "defectdensity",
+          "incident",
+          "bugflow",
+          "bugfix",
+          "qa",
+          "escapereview",
+          "clarcycle",
+          "reviewcycle"
+        ],
+        "layer": "widget",
+        "description": "Controls Sprint period source and Backlog Health automatic denominator."
+      },
+      "severityMap": {
+        "type": "object",
+        "default": {
+          "Critical": [
+            "blocker",
+            "critical",
+            "highest"
+          ],
+          "Major": [
+            "high",
+            "major"
+          ],
+          "Minor": [
+            "medium",
+            "normal",
+            "low",
+            "minor",
+            "trivial"
+          ]
+        },
+        "allowed_values": "Critical, Major, Minor arrays of Jira priorities.",
+        "metrics": [
+          "incident"
+        ],
+        "layer": "widget",
+        "description": "Priority mapping; a metric map takes precedence and an unmatched priority is Minor."
+      },
+      "personMinCohort": {
+        "type": "integer",
+        "default": 5,
+        "allowed_values": [
+          3,
+          5,
+          8,
+          10
+        ],
+        "metrics": [
+          "cycle",
+          "rework",
+          "backlog",
+          "designreview",
+          "flow",
+          "cycletime",
+          "lead",
+          "velocity",
+          "throughput",
+          "wip",
+          "floweff",
+          "leakage",
+          "defectdensity",
+          "incident",
+          "bugflow",
+          "bugfix",
+          "qa",
+          "escapereview",
+          "clarcycle",
+          "reviewcycle"
+        ],
+        "layer": "widget",
+        "description": "Minimum derived-record count for a named person in the selector; smaller groups become Other."
+      }
+    },
+    "metric": {
+      "cycle": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "req",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "devStart"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "cycle"
+          ],
+          "description": "End or completion anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "days",
+          "allowed_values": "Fixed for this metric: \"days\".",
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Requirements Cycle Time (avg days)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "cycle"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "rework": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "req",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "rework"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "anchor": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "devStart"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "rework"
+          ],
+          "description": "Event that anchors the record."
+        },
+        "returnTo": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "refinement"
+          },
+          "allowed_values": "An object identifying a named status set.",
+          "metrics": [
+            "rework"
+          ],
+          "description": "Status set used for return transitions."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "rate",
+          "allowed_values": "Fixed for this metric: \"rate\".",
+          "metrics": [
+            "rework"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "rework"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "rework"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "rework"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "rework"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Requirements Rework Rate (%)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "rework"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "backlog": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "backlog",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "membership": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "ready"
+          },
+          "allowed_values": "An object identifying the ready status set.",
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Ready membership status-set reference."
+        },
+        "defects": {
+          "layer": "metric",
+          "type": "string",
+          "default": "exclude",
+          "allowed_values": [
+            "exclude",
+            "auto",
+            "include"
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Whether ready defects are excluded, included or auto-detected."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "coverage",
+          "allowed_values": "Fixed for this metric: \"coverage\".",
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "denominator": {
+          "layer": "metric",
+          "type": "string",
+          "default": "auto",
+          "allowed_values": [
+            "auto",
+            "velocity_sp",
+            "throughput"
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Backlog Health team-speed unit selection."
+        },
+        "targetMin": {
+          "layer": "metric",
+          "type": "number",
+          "default": 2,
+          "allowed_values": [
+            0.5,
+            1,
+            1.5,
+            2,
+            2.5,
+            3
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Lower Backlog Health band boundary."
+        },
+        "targetMax": {
+          "layer": "metric",
+          "type": "number",
+          "default": 3,
+          "allowed_values": [
+            2,
+            2.5,
+            3,
+            3.5,
+            4,
+            5
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Upper Backlog Health band boundary."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Backlog Health (sprints of ready work)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "backlog"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "designreview": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Story",
+            "Task"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "designStart": {
+          "layer": "metric",
+          "type": "string",
+          "default": "",
+          "allowed_values": "A status name from the issue vocabulary, or an empty string.",
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Jira status identifying design start."
+        },
+        "reviewDone": {
+          "layer": "metric",
+          "type": "string",
+          "default": "",
+          "allowed_values": "A status name from the issue vocabulary, or an empty string.",
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Jira status identifying completed design review."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "days",
+          "allowed_values": "Fixed for this metric: \"days\".",
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Design Review Turnaround (avg days)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "designreview"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "flow": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "flow",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "flow"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "series": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "opened": {
+              "kind": "field",
+              "field": "created"
+            },
+            "resolved": {
+              "kind": "field",
+              "field": "resolutiondate"
+            }
+          },
+          "allowed_values": "An object mapping the metric's series names to anchor objects.",
+          "metrics": [
+            "flow"
+          ],
+          "description": "Anchor specifications for each flow series."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "flow",
+          "allowed_values": "Fixed for this metric: \"flow\".",
+          "metrics": [
+            "flow"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "flow"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "flow"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "up",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "flow"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "flow"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Opened vs Resolved",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "flow"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "cycletime": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "work",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "devStart"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "done"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "End or completion anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "days",
+          "allowed_values": "Fixed for this metric: \"days\".",
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Cycle Time (avg days)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "cycletime"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "lead": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Story",
+            "Task",
+            "Defect",
+            "Sub-bug"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "lead"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "lead"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "done",
+            "fallback": "resolutiondate"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "lead"
+          ],
+          "description": "End or completion anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "lead"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "days",
+          "allowed_values": "Fixed for this metric: \"days\".",
+          "metrics": [
+            "lead"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "lead"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "lead"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "lead"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "lead"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Lead Time (avg days)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "lead"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "velocity": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "velocity",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "resolutiondate"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "count",
+          "allowed_values": "Fixed for this metric: \"count\".",
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "up",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "velocityMode": {
+          "layer": "metric",
+          "type": "string",
+          "default": "auto",
+          "allowed_values": [
+            "auto",
+            "sp",
+            "items"
+          ],
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Velocity unit selection."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Issue Velocity (completed items per period)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "velocity"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "throughput": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "delivery",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "resolutiondate"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "count",
+          "allowed_values": "Fixed for this metric: \"count\".",
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "up",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Throughput (completed)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "throughput"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "wip": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Story",
+            "Task",
+            "Defect",
+            "Sub-bug"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "wip"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "devStart"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "wip"
+          ],
+          "description": "Start or period anchor specification. The current derivation reads shared status sets directly rather than this stored anchor."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "done"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "wip"
+          ],
+          "description": "End or completion anchor specification. The current derivation reads shared status sets directly rather than this stored anchor."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "wipSnapshot",
+          "allowed_values": "Fixed for this metric: \"wipSnapshot\".",
+          "metrics": [
+            "wip"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "wip"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "wip"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "wip"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "wip"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Work in Progress (WIP)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "wip"
+          ],
+          "description": "Configured display label."
+        },
+        "wipMode": {
+          "layer": "metric",
+          "type": "string",
+          "default": "total",
+          "allowed_values": [
+            "total",
+            "per_developer"
+          ],
+          "metrics": [
+            "wip"
+          ],
+          "description": "WIP snapshot in total issues or per developer."
+        }
+      },
+      "floweff": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "work",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "active": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "start": {
+              "kind": "status",
+              "set": "devStart"
+            },
+            "end": {
+              "kind": "status",
+              "set": "done"
+            }
+          },
+          "allowed_values": "An object containing start and end anchor objects.",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Start and end anchor specifications for active time."
+        },
+        "total": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "start": {
+              "kind": "field",
+              "field": "created"
+            },
+            "end": {
+              "kind": "status",
+              "set": "done"
+            }
+          },
+          "allowed_values": "An object containing start and end anchor objects.",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Start and end anchor specifications for elapsed time."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "eff",
+          "allowed_values": "Fixed for this metric: \"eff\".",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "up",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "avgUnit": {
+          "layer": "metric",
+          "type": "string",
+          "default": "%",
+          "allowed_values": "A display-unit string.",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Average-box display unit."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Flow Efficiency (%)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "floweff"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "leakage": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Defect",
+            "Sub-bug"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "rateMode": {
+          "layer": "metric",
+          "type": "string",
+          "default": "roles",
+          "allowed_values": "Fixed for this metric: \"roles\".",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Formula variant for role- or density-based rates."
+        },
+        "qaSet": {
+          "layer": "metric",
+          "type": "string",
+          "default": "qaSet",
+          "allowed_values": "A named workflow status set.",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "QA-status set reference."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "prodLabel": {
+          "layer": "metric",
+          "type": "string",
+          "default": "prod",
+          "allowed_values": "A Jira label token.",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Metric override for the shared production label."
+        },
+        "bucketBy": {
+          "layer": "metric",
+          "type": "string",
+          "default": "created",
+          "allowed_values": "Fixed for this metric: \"created\".",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Configured bucket field."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "rate",
+          "allowed_values": "Fixed for this metric: \"rate\".",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Production Leakage Rate (%)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "leakage"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "defectdensity": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Story",
+            "Task",
+            "Defect",
+            "Sub-bug"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "densityMode": {
+          "layer": "metric",
+          "type": "string",
+          "default": "auto",
+          "allowed_values": [
+            "auto",
+            "per_sp",
+            "per_item"
+          ],
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Defect density denominator selection."
+        },
+        "rateMode": {
+          "layer": "metric",
+          "type": "string",
+          "default": "spDensity",
+          "allowed_values": "Fixed for this metric: \"spDensity\".",
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Formula variant for role- or density-based rates."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "rate",
+          "allowed_values": "Fixed for this metric: \"rate\".",
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Defect Density",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "defectdensity"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "incident": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Defect",
+            "Sub-bug"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "prodLabel": {
+          "layer": "metric",
+          "type": "string",
+          "default": "prod",
+          "allowed_values": "A Jira label token.",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Metric override for the shared production label."
+        },
+        "groupBy": {
+          "layer": "metric",
+          "type": "string",
+          "default": "severity",
+          "allowed_values": "Fixed for this metric: \"severity\".",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Grouping field."
+        },
+        "severityMap": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "Critical": [
+              "blocker",
+              "critical",
+              "highest"
+            ],
+            "Major": [
+              "high",
+              "major"
+            ],
+            "Minor": [
+              "medium",
+              "normal",
+              "low",
+              "minor",
+              "trivial"
+            ]
+          },
+          "allowed_values": "An object containing Critical, Major and Minor arrays of Jira priority names.",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Metric override for priority-to-severity mapping."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "grouped",
+          "allowed_values": "Fixed for this metric: \"grouped\".",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "incident"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "incident"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "incident"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "incident"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Incident Frequency",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "incident"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "bugflow": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "bug",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "series": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "new": {
+              "kind": "field",
+              "field": "created"
+            },
+            "resolved": {
+              "kind": "field",
+              "field": "resolutiondate"
+            }
+          },
+          "allowed_values": "An object mapping the metric's series names to anchor objects.",
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Anchor specifications for each flow series."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "flow",
+          "allowed_values": "Fixed for this metric: \"flow\".",
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "up",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Bug Growth (new vs resolved)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "bugflow"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "bugfix": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Defect",
+            "Sub-bug"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "allocation",
+          "allowed_values": "Fixed for this metric: \"allocation\".",
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "requires": {
+          "layer": "metric",
+          "type": "string",
+          "default": "timeSpent",
+          "allowed_values": "Fixed for this metric: \"timeSpent\".",
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Required data signal."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Bug Fixing Time Allocation (%)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "bugfix"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "qa": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "work",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "qa"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "qaEntry"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "qa"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "qaExit"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "qa"
+          ],
+          "description": "End or completion anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "qa"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "days",
+          "allowed_values": "Fixed for this metric: \"days\".",
+          "metrics": [
+            "qa"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "qa"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "qa"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "qa"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "qa"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Time in QA (avg days)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "qa"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "escapereview": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "bug",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "reviewLabel": {
+          "layer": "metric",
+          "type": "string",
+          "default": "",
+          "allowed_values": "A label from the issue vocabulary, or an empty string.",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Label for defects found in review."
+        },
+        "qaLabel": {
+          "layer": "metric",
+          "type": "string",
+          "default": "",
+          "allowed_values": "A label from the issue vocabulary, or an empty string.",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Label for defects found in QA."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Start or period anchor specification."
+        },
+        "bucketBy": {
+          "layer": "metric",
+          "type": "string",
+          "default": "created",
+          "allowed_values": "Fixed for this metric: \"created\".",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Configured bucket field."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "rate",
+          "allowed_values": "Fixed for this metric: \"rate\".",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "rateMode": {
+          "layer": "metric",
+          "type": "string",
+          "default": "labels",
+          "allowed_values": "Fixed for this metric: \"labels\".",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Formula variant for role- or density-based rates."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Defect Escape Rate (Review → QA) (%)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "escapereview"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "clarcycle": {
+        "types": {
+          "layer": "metric",
+          "type": "array",
+          "default": [
+            "Story",
+            "Task"
+          ],
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "start": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "field",
+            "field": "created"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set.",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Start or period anchor specification. The current derivation reads shared status sets directly rather than this stored anchor."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "devStart"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "End or completion anchor specification. The current derivation reads shared status sets directly rather than this stored anchor."
+        },
+        "returnTo": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "refinement"
+          },
+          "allowed_values": "An object identifying a named status set.",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Status set used for return transitions."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "count",
+          "allowed_values": "Fixed for this metric: \"count\".",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Clarification Cycle Count (avg cycles)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "clarcycle"
+          ],
+          "description": "Configured display label."
+        }
+      },
+      "reviewcycle": {
+        "types": {
+          "layer": "metric",
+          "type": "string",
+          "default": "work",
+          "allowed_values": "An alias from the widget types object or an array of normalized issue-type names.",
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Issue type pool as a widget alias or explicit list."
+        },
+        "end": {
+          "layer": "metric",
+          "type": "object",
+          "default": {
+            "kind": "status",
+            "set": "done"
+          },
+          "allowed_values": "An anchor object: kind field with field created or resolutiondate, or kind status with a named status set; optional fallback resolutiondate where supported.",
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "End or completion anchor specification."
+        },
+        "aggregation": {
+          "layer": "metric",
+          "type": "string",
+          "default": "avg",
+          "allowed_values": "Fixed for this metric: \"avg\".",
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Aggregation mode; semantic and read-only in the metric panel."
+        },
+        "value": {
+          "layer": "metric",
+          "type": "string",
+          "default": "count",
+          "allowed_values": "Fixed for this metric: \"count\".",
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Derived value field for averaging."
+        },
+        "granularity": {
+          "layer": "metric",
+          "type": "string",
+          "default": "sprint",
+          "allowed_values": [
+            "daily",
+            "weekly",
+            "sprint",
+            "monthly",
+            "quarterly",
+            "annual"
+          ],
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Stored default period configuration; the widget selector initially selects Sprint."
+        },
+        "defaultN": {
+          "layer": "metric",
+          "type": "number",
+          "default": 5,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Number of periods in the untouched default window."
+        },
+        "trendDir": {
+          "layer": "metric",
+          "type": "string",
+          "default": "down",
+          "allowed_values": [
+            "up",
+            "down"
+          ],
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Direction regarded as improving by the trend rule."
+        },
+        "stablePct": {
+          "layer": "metric",
+          "type": "number",
+          "default": 10,
+          "allowed_values": [
+            5,
+            10,
+            15,
+            20,
+            25,
+            30
+          ],
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Stable band percentage for the trend rule."
+        },
+        "label": {
+          "layer": "metric",
+          "type": "string",
+          "default": "Review Cycle Count (avg re-reviews)",
+          "allowed_values": "A display label string.",
+          "metrics": [
+            "reviewcycle"
+          ],
+          "description": "Configured display label."
+        }
+      }
+    },
+    "lifecycle": "Both layers are merged from defaults and overrides; settings persist in browser localStorage. The ready set belongs to widget settings data but has a single editor in Backlog Health metric settings. Runtime project status discovery can seed selected defaults."
+  },
+  "shared_pipeline": {
+    "periods": "The selector offers daily, weekly, sprint, monthly, quarterly and annual; Sprint and five periods are the UI defaults, with per-metric defaultN. Auto uses Jira sprint IDs when more than 50% of all loaded issues have a populated Sprint value, including undated values; available forces Jira sprints and none forces two-week ISO calendar buckets. Real Sprint uses the latest N completed usable sprints with dimension-matched project activity. Activity includes an issue whose lifetime overlaps the sprint or a status event in it. Manual dates select whole intersecting active sprint periods, including unfinished ones; incomplete periods are excluded from comparative trend verdicts. Sprint IDs remain separate even across overlapping boards. A derived event belongs only to its issue's single usable sprint containing its anchor; no membership, no matching boundary or ambiguous membership excludes it. WIP and ready snapshots instead resolve membership at the sprint's end control point and require a unique match there. Intervals are start-inclusive and end-exclusive. A closed sprint uses valid completeDate, otherwise valid endDate; dates are not invented. The active sprint cutoff is the latest captured project timestamp or closed sprint finish. For calendar periods, the common project anchor is the last bucket with at least max(1, ceil(10% of the lower median of nonempty buckets)) creation, resolution and status events under the selected dimension, with project-wide fallback. The default window contains N contiguous buckets ending there, so some may be empty; the same anchor is shared, but metric-specific anchor events determine which derived records enter each period. For a project that ended in late 2025, anchoring on its recorded activity naturally retains historical periods instead of moving the default to today's date. A manual calendar range covers all intersecting buckets; if one side is missing, it is inferred from the filtered metric items. Manual ranges are remembered by metric and granularity and reset on metric-settings Apply.",
+    "dimensions": "Project is the default and selects all project records. Team resolves live: none gives Team is not defined; field gives one value; labels can assign one issue to every selected matching label; unresolved issues use Team is not defined. Component reads the record's component-derived team value; Epic uses epic or parent fallback; Person uses assignee. Person is for coaching only, never performance evaluation. At selector population, persons with fewer than personMinCohort derived records after the current type selection are grouped into Other; the selector count is not restricted by the calendar range. An issue drilldown provides work-item detail; it is not an additional dimension selector.",
+    "issue_type_filter": "The top-panel selection is session-local per metric and is seeded by its metric type pool. It filters already-derived records; it cannot create numerator records beyond the metric pool. Bug Fixing's independently derived denominator can admit additional types when selected, while Backlog Health's velocity denominator is handled separately.",
+    "aggregation_modes": {
+      "avg": "Arithmetic average of eligible values per period and across the window; floweff instead divides summed active days by summed total days at both levels.",
+      "rate": "Counted successes divided by total, times 100; the average box divides window totals. Role-based rates use numerator and denominator roles. Density divides defects by the selected denominator without multiplying by 100 and only computable periods enter its box.",
+      "allocation": "Sum numerator time divided by denominator time times 100 per period and over the window.",
+      "count": "Counts per period, including zeros; Velocity may sum SP instead. The box is total divided by number of periods, but is hidden if its total is zero.",
+      "flow": "Counts each of two series per period, including zeros; box reports each series total divided by number of periods.",
+      "grouped": "Counts by severity, with zero-filled periods; box reports total incidents divided by number of periods.",
+      "wipSnapshot": "At each period end count active intervals; per-developer mode divides by unique assignees and returns null with none. Box averages defined snapshots.",
+      "coverage": "Divide the ready snapshot by same-period completed speed in matching units. Display zero when speed is zero; box averages only control points with positive numerator and denominator."
+    },
+    "trend": "Single-series verdicts require three defined completed-period values. Ordinary least-squares slope times the span of defined period indices, divided by absolute mean and multiplied by 100, is compared to stablePct, default 10. An all-zero series is stable; otherwise the configured up/down direction determines improving or degrading. Delta compares adjacent last and previous completed values and is unavailable if either is missing or the previous value is zero. Flow and bugflow instead use net resolved-minus-opened level and signed balance trend: the trend can soften an unfavourable or favourable net, but cannot reverse it. Backlog Health judges the most recent computable completed control point against its configured band rather than using a slope verdict.",
+    "tooltips": "Each metric has its own explanatory tooltip. Formula, current types, effective states, counted population, trend rule, Sprint notices and person-use notices can be rebuilt from settings or the active window; static explanatory text and reference lines remain fixed where present.",
+    "healthy_reference_lines": "Static guidance appears for cycle, rework, designreview, cycletime, lead, floweff, leakage, bugfix, qa, clarcycle and reviewcycle; WIP has a line in per-developer mode. Backlog Health uses its configurable band. Other metrics have no guidance line.",
+    "empty_values": "Count and flow periods are zero-filled; averages and rates without a denominator are gaps. Empty type selections suppress the verdict. The box can be hidden when its value is unavailable; insufficient points suppress a comparative trend, not necessarily the metric."
+  },
+  "na_conditions": {
+    "all": [
+      {
+        "state": "No usable Jira sprint periods",
+        "reason": "no usable Jira sprint periods in this selection.",
+        "trigger": "Real Sprint is selected and no eligible usable periods survive selection."
+      }
+    ],
+    "backlog": [
+      {
+        "state": "Ready status absent",
+        "reason": "No ready status present in the project history. Assign the status that marks a story/task as ready to start in the Backlog Health metric settings (Ready status selector, set: ready).",
+        "trigger": "No configured ready status appears in current status or captured history."
+      },
+      {
+        "state": "Forced SP ready side",
+        "reason": "the forced Story-Point coverage cannot be computed — the ready side carries no story points in the window",
+        "trigger": "Forced velocity_sp and no positive SP on participating ready items."
+      },
+      {
+        "state": "Forced SP completed side",
+        "reason": "the forced Story-Point coverage cannot be computed — the completed velocity side carries no story points in the window",
+        "trigger": "Forced velocity_sp, ready SP present, but no positive SP on qualifying completed velocity items."
+      }
+    ],
+    "designreview": [
+      {
+        "state": "Unconfigured statuses",
+        "reason": "Configure the design start and review done statuses in metric settings to enable this metric.",
+        "trigger": "Either status is empty."
+      },
+      {
+        "state": "Equal statuses",
+        "reason": "Design start and review done must be different statuses — with the same status every interval is zero days.",
+        "trigger": "Configured strings are identical."
+      },
+      {
+        "state": "No derived items",
+        "reason": "No items with both transitions in the current window.",
+        "trigger": "The global derived designreview array is empty; the message mentions the current window, but the check is global."
+      }
+    ],
+    "escapereview": [
+      {
+        "state": "Unconfigured labels",
+        "reason": "Configure the review and QA labels in metric settings to enable this metric.",
+        "trigger": "Either label is empty."
+      },
+      {
+        "state": "Equal labels",
+        "reason": "The review and QA labels must be different — with the same label the numerator equals the denominator.",
+        "trigger": "Configured labels compare equal ignoring case."
+      },
+      {
+        "state": "No derived items",
+        "reason": "No defects with the configured labels in the current window.",
+        "trigger": "The global derived escapereview array is empty; the message mentions the current window, but the check is global."
+      }
+    ],
+    "reviewcycle": [
+      {
+        "state": "Review statuses absent",
+        "reason": "Configure at least one review status in widget settings to enable this metric.",
+        "trigger": "The review status set is empty."
+      }
+    ],
+    "velocity": [
+      {
+        "state": "Forced SP absent",
+        "reason": "no story points in the current window (forced SP state)",
+        "trigger": "Forced sp mode with no qualifying positive story points in the filtered window."
+      }
+    ],
+    "defectdensity": [
+      {
+        "state": "Forced SP absent",
+        "reason": "no story points in the current window (forced SP-weighted mode)",
+        "trigger": "Forced per_sp mode and no positive story points among denominator records in the filtered window."
+      }
+    ],
+    "bugfix": [
+      {
+        "state": "Insufficient time spent",
+        "reason": "the project does not log work time (timespent fill-rate < 20%).",
+        "trigger": "Fewer than 20% of filtered allocation role records have positive time spent, or no records exist."
+      }
+    ]
+  },
+  "data_quality": {
+    "teams": "Detect source and discovered fields or matching labels; unresolved values are grouped as Team is not defined. No metric-level N/A.",
+    "story_points": "Positive SP fill among selected velocity or density denominator items determines automatic mode at 50%; Backlog Health additionally checks both sides and Sprint availability. Automatic modes fall back to item counts. Forced unsupported modes produce the corresponding recorded reason.",
+    "worklog": "The browser counts allocation role records with positive issue timeSpent; fewer than 20% or none produces the bugfix reason. Individual worklog rows are not used.",
+    "sprint_data": "Populated Sprint values determine the project-wide auto threshold. Below or equal to 50% uses calendar buckets; available forces Jira periods, with the shared N/A reason if none are usable.",
+    "review_statuses": "An empty review set gives the reviewcycle reason; generation may seed statuses containing review.",
+    "escape_labels": "Missing, equal, or globally absent matching labels give the respective escapereview reason; no fallback formula.",
+    "design_statuses": "Missing, equal, or globally absent derived intervals give the respective designreview reason; no fallback formula.",
+    "ready_status": "No configured ready status in captured history or current status yields the backlog reason. An item currently ready without an entry transition uses a clamped, unverified start."
+  },
+  "hard_exclusions": {
+    "scope": "Only Jira-native inputs and the 20 metrics named in this contract are in scope; other dashboard sections and unrelated data are excluded."
+  },
+  "metrics": [
+    {
+      "id": "cycle",
+      "display_name": "Requirements Cycle Time",
+      "phase": "Requirements",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "days",
+      "default_issue_types": [
+        "Story",
+        "Task"
+      ],
+      "jira_inputs": [
+        "created",
+        "events"
+      ],
+      "derivation": "For each selected requirement, subtract creation date from its first devStart transition; bucket by that transition and average whole days.",
+      "zero_day_rule": "Intervals under one whole day and nonpositive intervals are excluded.",
+      "trend_rule": "down",
+      "healthy_reference": "Less than 14 days.",
+      "settings": [
+        "types",
+        "start",
+        "end",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Missing either anchor excludes the item.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "rework",
+      "display_name": "Requirements Rework Rate",
+      "phase": "Requirements",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "rate",
+      "unit": "percent",
+      "default_issue_types": [
+        "Story",
+        "Task"
+      ],
+      "jira_inputs": [
+        "events"
+      ],
+      "derivation": "Among items with a first devStart event, divide those with a later transition into refinement by all started items, times 100; bucket at devStart.",
+      "zero_day_rule": "Not a duration; zero rework is included.",
+      "trend_rule": "down",
+      "healthy_reference": "Below 10%; above 20% is a warning.",
+      "settings": [
+        "types",
+        "anchor",
+        "returnTo",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Only events after the anchor count; a missing start excludes the item.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "backlog",
+      "display_name": "Backlog Health",
+      "phase": "Backlog",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "coverage",
+      "unit": "ready work periods",
+      "default_issue_types": [
+        "Story",
+        "Task"
+      ],
+      "jira_inputs": [
+        "created",
+        "status",
+        "events",
+        "sp",
+        "sprint_ids"
+      ],
+      "derivation": "At each period end count ready items or sum their points, then divide by the completed velocity item count or points in that same period. Auto SP requires Sprint availability and positive SP on both sides.",
+      "zero_day_rule": "Not a duration; zero bars can denote a non-computable control point.",
+      "trend_rule": "band",
+      "healthy_reference": "Configured band, by default 2–3 periods.",
+      "settings": [
+        "types",
+        "membership",
+        "defects",
+        "start",
+        "aggregation",
+        "denominator",
+        "targetMin",
+        "targetMax",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "backlog"
+      ],
+      "edge_cases": "The average and verdict use computable points only. A current ready status without a captured entry is clamped to the window or Jira snapshot. The speed population is velocity records restricted to Story, Task, Defect, independent of the numerator type selection.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "designreview",
+      "display_name": "Design Review Turnaround",
+      "phase": "Design",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "days",
+      "default_issue_types": [
+        "Story",
+        "Task"
+      ],
+      "jira_inputs": [
+        "events"
+      ],
+      "derivation": "Average whole days from the first configured design-start transition to the first configured review-done transition; bucket at review completion.",
+      "zero_day_rule": "Nonpositive and under-one-whole-day intervals are excluded.",
+      "trend_rule": "down",
+      "healthy_reference": "At most 2 days.",
+      "settings": [
+        "types",
+        "designStart",
+        "reviewDone",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "designreview"
+      ],
+      "edge_cases": "Both configured statuses must be different; elapsed calendar time is used, not business-day arithmetic.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "flow",
+      "display_name": "Opened vs Resolved",
+      "phase": "Flow",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "flow",
+      "unit": "issues",
+      "default_issue_types": [
+        "Story",
+        "Task"
+      ],
+      "jira_inputs": [
+        "created",
+        "resolutiondate"
+      ],
+      "derivation": "Count created and resolved requirements separately per period; compare the net resolved minus opened balance.",
+      "zero_day_rule": "Not a duration; empty periods are zero-filled.",
+      "trend_rule": "balance",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "series",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "A single issue can contribute to both series, in different periods.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "cycletime",
+      "display_name": "Cycle Time",
+      "phase": "Development",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "days",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "events"
+      ],
+      "derivation": "Average whole days from first devStart to first done transition; bucket at done.",
+      "zero_day_rule": "Nonpositive and under-one-whole-day intervals are excluded.",
+      "trend_rule": "down",
+      "healthy_reference": "Less than 14 days.",
+      "settings": [
+        "types",
+        "start",
+        "end",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Both transitions must exist and be ordered.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "lead",
+      "display_name": "Issue Lead Time (avg days)",
+      "phase": "Development",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "days",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "resolutiondate",
+        "events"
+      ],
+      "derivation": "Average whole days from creation to first done; if missing, use resolution date; bucket at the end anchor.",
+      "zero_day_rule": "Nonpositive and under-one-whole-day intervals are excluded, including fallback.",
+      "trend_rule": "down",
+      "healthy_reference": "Less than 30 days.",
+      "settings": [
+        "types",
+        "start",
+        "end",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Missing or reversed anchors exclude the item.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "velocity",
+      "display_name": "Issue Velocity (completed items per period)",
+      "phase": "Development",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "count",
+      "unit": "story points or items per period",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect"
+      ],
+      "jira_inputs": [
+        "resolutiondate",
+        "sp"
+      ],
+      "derivation": "Count completed items or sum their points by resolution date. Auto selects SP when at least half the qualifying completed items have positive points and SP is available.",
+      "zero_day_rule": "Not a duration; empty periods are zero-filled.",
+      "trend_rule": "up",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "start",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "velocityMode",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "velocity"
+      ],
+      "edge_cases": "A forced SP mode without window SP is N/A; missing points contribute zero in SP mode.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "throughput",
+      "display_name": "Throughput",
+      "phase": "Development",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "count",
+      "unit": "issues",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect"
+      ],
+      "jira_inputs": [
+        "resolutiondate"
+      ],
+      "derivation": "Count completed items by resolution date per period.",
+      "zero_day_rule": "Not a duration; empty periods are zero-filled.",
+      "trend_rule": "up",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "start",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "A missing resolution date excludes the item.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "wip",
+      "display_name": "Work in Progress",
+      "phase": "Flow",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "wipSnapshot",
+      "unit": "items per developer or items",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "events",
+        "person"
+      ],
+      "derivation": "Count items active at each period end from first devStart until first later done; optionally divide by unique assignees in the snapshot.",
+      "zero_day_rule": "Not a duration; zero total WIP is included.",
+      "trend_rule": "down",
+      "healthy_reference": "At most 1.5 items per developer when per_developer mode is selected.",
+      "settings": [
+        "types",
+        "start",
+        "end",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label",
+        "wipMode"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Without an assignee in per-developer mode the control point is null; unfinished work stays active. Derivation reads the shared devStart and done sets directly, rather than the stored WIP start/end anchor specifications.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "floweff",
+      "display_name": "Flow Efficiency",
+      "phase": "Flow",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "percent",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "events"
+      ],
+      "derivation": "Sum whole active days from devStart to done divided by summed whole elapsed days from creation to done, times 100; bucket at total interval end.",
+      "zero_day_rule": "Total must be positive in whole days; active days may be zero.",
+      "trend_rule": "up",
+      "healthy_reference": "Below 25% poor; above 50% good.",
+      "settings": [
+        "types",
+        "active",
+        "total",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "avgUnit",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Both intervals must be positive before flooring; aggregation is weighted by total days.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "leakage",
+      "display_name": "Production Leakage Rate",
+      "phase": "Testing",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "rate",
+      "unit": "percent",
+      "default_issue_types": [
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "events",
+        "labels"
+      ],
+      "derivation": "Count production-labelled defects divided by the union of defects reaching qaSet or carrying the production label, times 100, by creation date.",
+      "zero_day_rule": "Not a duration; an empty denominator is a gap.",
+      "trend_rule": "down",
+      "healthy_reference": "Below 15%.",
+      "settings": [
+        "types",
+        "rateMode",
+        "qaSet",
+        "start",
+        "prodLabel",
+        "bucketBy",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "An issue in both groups is counted once in the denominator.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "defectdensity",
+      "display_name": "Defect Density",
+      "phase": "Testing",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "rate",
+      "unit": "defects per item or story point",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "events",
+        "labels",
+        "sp"
+      ],
+      "derivation": "Divide QA-transitioned, non-production defect count by completed non-defect work count or its story points. Defects use creation date; work uses first done transition.",
+      "zero_day_rule": "Not a duration; an empty denominator is a gap.",
+      "trend_rule": "down",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "densityMode",
+        "rateMode",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "defectdensity"
+      ],
+      "edge_cases": "Auto selects per_sp when at least 50% of denominator records have positive SP; forced per_sp without SP is N/A. Only computable periods feed the average.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "incident",
+      "display_name": "Incident Frequency",
+      "phase": "Operations",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "grouped",
+      "unit": "issues",
+      "default_issue_types": [
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "labels",
+        "priority"
+      ],
+      "derivation": "Count production-labelled selected issues by priority-derived Critical, Major or Minor severity, by creation date.",
+      "zero_day_rule": "Not a duration; empty periods are zero-filled.",
+      "trend_rule": "down",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "start",
+        "prodLabel",
+        "groupBy",
+        "severityMap",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Unmapped priorities are Minor; the average is total incidents per period.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "bugflow",
+      "display_name": "Bug Growth (new vs resolved)",
+      "phase": "Defects",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "flow",
+      "unit": "issues",
+      "default_issue_types": [
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "resolutiondate"
+      ],
+      "derivation": "Count new and resolved defect issues separately by creation and resolution date; judge resolved minus new balance.",
+      "zero_day_rule": "Not a duration; empty periods are zero-filled.",
+      "trend_rule": "balance",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "series",
+        "aggregation",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "A single defect can contribute to both series.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "bugfix",
+      "display_name": "Bug Fixing Time Allocation",
+      "phase": "Defects",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "allocation",
+      "unit": "percent",
+      "default_issue_types": [
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "events",
+        "timeSpent",
+        "type"
+      ],
+      "derivation": "Divide total time spent on the metric's selected numerator types by time spent on denominator records, times 100; bucket at first done. Denominator records are initially derived from all completed types except Sub-task and Test.",
+      "zero_day_rule": "Not a duration; empty denominator is a gap.",
+      "trend_rule": "down",
+      "healthy_reference": "Below 20%.",
+      "settings": [
+        "types",
+        "aggregation",
+        "requires",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "bugfix"
+      ],
+      "edge_cases": "The top Issue Type filter is applied to both numerator and denominator records during rendering; with the default defect-only selection, other work is filtered out of the denominator. Selecting other types can admit their already-derived denominator records without adding numerator records. Stored issue totals are assigned to the completion period, not individual worklog dates.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "qa",
+      "display_name": "Time in QA",
+      "phase": "Testing",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "days",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "events"
+      ],
+      "derivation": "Average whole days between the first qaEntry and first qaExit transition, bucketed at qaExit.",
+      "zero_day_rule": "Nonpositive and under-one-whole-day intervals are excluded.",
+      "trend_rule": "down",
+      "healthy_reference": "Less than 14 days.",
+      "settings": [
+        "types",
+        "start",
+        "end",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "An exit preceding entry is excluded.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "escapereview",
+      "display_name": "Defect Escape Rate (Review → QA)",
+      "phase": "Review",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "rate",
+      "unit": "percent",
+      "default_issue_types": [
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "created",
+        "labels"
+      ],
+      "derivation": "Divide issues with the configured QA label by the union carrying QA or review label, times 100, by creation date.",
+      "zero_day_rule": "Not a duration; empty denominator is a gap.",
+      "trend_rule": "down",
+      "healthy_reference": "None.",
+      "settings": [
+        "types",
+        "reviewLabel",
+        "qaLabel",
+        "start",
+        "bucketBy",
+        "aggregation",
+        "rateMode",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "escapereview"
+      ],
+      "edge_cases": "Both labels must be nonempty and different ignoring case; matching uses the label token rule.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "clarcycle",
+      "display_name": "Clarification Cycle Count",
+      "phase": "Requirements",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "cycles",
+      "default_issue_types": [
+        "Story",
+        "Task"
+      ],
+      "jira_inputs": [
+        "events"
+      ],
+      "derivation": "Count returns to refinement before the first devStart transition; the initial refinement entry is free. Average counts for started items by devStart.",
+      "zero_day_rule": "Not a duration; zero cycles are included.",
+      "trend_rule": "down",
+      "healthy_reference": "At most 2 cycles.",
+      "settings": [
+        "types",
+        "start",
+        "end",
+        "returnTo",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all"
+      ],
+      "edge_cases": "Items with no devStart do not contribute. Derivation uses the shared devStart set directly rather than the stored start/end anchor specifications; returnTo is used.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    },
+    {
+      "id": "reviewcycle",
+      "display_name": "Review Cycle Count",
+      "phase": "Review",
+      "shared_pipeline": "shared_pipeline",
+      "aggregation": "avg",
+      "unit": "cycles",
+      "default_issue_types": [
+        "Story",
+        "Task",
+        "Defect",
+        "Sub-bug"
+      ],
+      "jira_inputs": [
+        "status",
+        "events"
+      ],
+      "derivation": "For currently done items, count review-status entries through the last done transition minus one; average by last done.",
+      "zero_day_rule": "Not a duration; a single review contributes zero.",
+      "trend_rule": "down",
+      "healthy_reference": "At most 2 cycles.",
+      "settings": [
+        "types",
+        "end",
+        "aggregation",
+        "value",
+        "granularity",
+        "defaultN",
+        "trendDir",
+        "stablePct",
+        "label"
+      ],
+      "na_conditions": [
+        "all",
+        "reviewcycle"
+      ],
+      "edge_cases": "Items with no review entry or no last done event are excluded; review statuses may be auto-seeded.",
+      "dimensions": [
+        "project",
+        "team",
+        "component",
+        "epic",
+        "person",
+        "time"
+      ]
+    }
+  ]
+}

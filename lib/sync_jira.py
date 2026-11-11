@@ -5,10 +5,11 @@ import json
 import os
 
 from .atlassian_api import scalar, strip_html_to_text
+from .jira_sprints import normalize_sprints
 
 
 def fetch_field_meta(api):
-    return {f["id"]: f["name"] for f in api.get("/rest/api/2/field")}
+    return api.get("/rest/api/2/field")
 
 
 def build_issue_text(key, fields, field_names):
@@ -133,7 +134,7 @@ def extract_status_timestamps(changelog):
     }
 
 
-def sync_jira(api, project_key, jql, field_names, url_base, days):
+def sync_jira(api, project_key, jql, field_names, url_base, days, *, sprint_fields=()):
     print(f"[Jira] Querying issues for project '{project_key}'...")
     issues, start, page = [], 0, 100
     while True:
@@ -203,6 +204,13 @@ def sync_jira(api, project_key, jql, field_names, url_base, days):
             if comments_meta else None,
             "url": f"{url_base}/browse/{iss['key']}",
         }
+        sprint_values = [
+            iss["fields"].get(fid) for fid in sprint_fields or
+            [fid for fid, name in field_names.items() if name.lower() == "sprint"]
+        ]
+        # Preserve original structured objects, not scalar()'s name-only rendering.
+        meta["sprints_json"] = json.dumps(sprint_values, ensure_ascii=False)
+        meta["has_sprint_field"] = normalize_sprints(sprint_values)[0]
         # Append status history to the document text for traceability
         text = build_issue_text(iss["key"], iss["fields"], field_names)
         if ts["history"]:

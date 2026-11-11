@@ -230,7 +230,7 @@ def _render_html_shell(ctx):
                 <select id="cfdPeriods" onchange="cfdPeriodsChanged()" class="border rounded px-2 py-1 text-sm">
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
-                  <option value="sprint" selected>Sprint (2 weeks)</option>
+                  <option value="sprint" selected>Sprint</option>
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="annual">Annual</option>

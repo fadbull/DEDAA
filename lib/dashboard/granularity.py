@@ -21,10 +21,146 @@ var RC_DEFAULT_N = 5;
 // own default window; a metric the user edited keeps its manual window.
 // The old global flag is kept as a compatibility alias (read-only).
 var rcCalTouchedMem={};
-function rcCalTouchedCur(){ return !!rcCalTouchedMem[rcMetric]; }
-function rcCalTouchedSet(){ rcCalTouchedMem[rcMetric]=true; }
-function rcCalTouchedMemReset(){ rcCalTouchedMem={}; rcCalTouched=false; }
+var rcCalendarRanges={};
+function rcCalendarKey(){ return rcMetric+'|'+(document.getElementById('rcPeriods').value||'sprint'); }
+function rcCalTouchedCur(){ return !!rcCalendarRanges[rcCalendarKey()]; }
+function rcCalTouchedSet(){
+  if(!document.getElementById('rcFrom').value&&!document.getElementById('rcTo').value){
+    delete rcCalendarRanges[rcCalendarKey()];
+    delete rcCalTouchedMem[rcMetric];
+    return;
+  }
+  rcCalTouchedMem[rcMetric]=true;
+  rcCalendarRanges[rcCalendarKey()]={
+    from:document.getElementById('rcFrom').value, to:document.getElementById('rcTo').value
+  };
+}
+function rcCalTouchedMemReset(){ rcCalTouchedMem={}; rcCalendarRanges={}; rcCalTouched=false; }
 var rcCalTouched = false;
+
+function rcSprintSource(S){
+  var setting=(S||{}).sprintData||'auto';
+  if(setting!=='auto') return setting==='available';
+  if(typeof RC_SPRINT_COVERAGE!=='undefined'){
+    return RC_SPRINT_COVERAGE.total>0 &&
+      RC_SPRINT_COVERAGE.populated/RC_SPRINT_COVERAGE.total>0.5;
+  }
+  var normalized=(RC_RAW||[]).some(function(r){ return r.has_sprint!==undefined; });
+  if(normalized){
+    return RC_RAW.filter(function(r){ return r.has_sprint; }).length/RC_RAW.length>0.5;
+  }
+  return typeof RC_HAS_SPRINTS_DATA!=='undefined' && !!RC_HAS_SPRINTS_DATA;
+}
+// Trends owns this context; the separate Delivery CFD keeps calendar helpers.
+function rcSprintContext(gran, from, to, manual){
+  var C={real:gran==='sprint'&&rcSprintSource(rcDraft||RC_SETTINGS),
+         periods:[], all:[], byId:{}, omitted:{}, partial:{}};
+  if(!C.real) return C;
+  var cutoff=0, dim=document.getElementById('rcDim').value, sel=rcSelected(), relevant={};
+  function observe(value){
+    var t=Date.parse(value);
+    if(isFinite(t)) cutoff=Math.max(cutoff,t);
+  }
+  (RC_RAW||[]).forEach(function(r){
+    observe(r.updated_ts||''); observe(r.created_ts||r.created);
+    observe(r.resolved_ts||r.resolutiondate);
+    (r.events||[]).forEach(function(e){ observe(e[0]); });
+    if(rcDimMatch(r,dim,sel)) (r.sprint_ids||[]).forEach(function(id){
+      if(!relevant[id]) relevant[id]=[];
+      relevant[id].push(r);
+    });
+  });
+  var catalog=typeof RC_SPRINT_CATALOG==='undefined'?[]:RC_SPRINT_CATALOG;
+  catalog.forEach(function(s){ if(s.closed&&s.usable) observe(s.finish); });
+  C.cutoff=cutoff;
+  catalog.forEach(function(s){
+    if(!s.usable || s.state==='future') return;
+    var start=Date.parse(s.start), end=s.closed?Date.parse(s.finish):cutoff+1;
+    if(!isFinite(start)||!isFinite(end)||end<=start) return;
+    var p={id:'jira:'+s.id, sourceId:String(s.id), start:start, end:end,
+           closed:!!s.closed, label:s.name, board:s.board||''};
+    C.byId[p.id]=p; C.all.push(p);
+  });
+  C.all.sort(function(a,b){ return a.end-b.end||a.start-b.start||a.id.localeCompare(b.id); });
+  var names=Object.create(null);
+  C.all.forEach(function(p){ names[p.label]=(names[p.label]||0)+1; });
+  C.all.forEach(function(p){
+    if(names[p.label]>1) p.label+=' (Board '+(p.board||'?')+', #'+p.sourceId+')';
+  });
+  C.periods=C.all.filter(function(p){
+    var active=(relevant[p.sourceId]||[]).some(function(r){
+      var created=Date.parse(r.created_ts||r.created), resolved=Date.parse(r.resolved_ts||r.resolutiondate);
+      if(isFinite(created)&&created<p.end&&(!isFinite(resolved)||resolved>=p.start)) return true;
+      return (r.events||[]).some(function(e){
+        var t=Date.parse(e[0]); return t>=p.start&&t<p.end;
+      });
+    });
+    if(!active) return false;
+    if(manual) return (!from||p.end>from.getTime())&&(!to||p.start<=to.getTime());
+    return p.closed;
+  });
+  if(!manual){
+    var m=((rcDraft||RC_SETTINGS).metrics||{})[rcMetric]||{};
+    C.periods=C.periods.slice(-Math.max(1,Number(m.defaultN)||RC_DEFAULT_N));
+  }
+  C.periods.forEach(function(p){ if(!p.closed) C.partial[p.id]=1; });
+  C.selected={};
+  C.periods.forEach(function(p){ C.selected[p.id]=1; });
+  C.window=C.periods.length?{
+    from:new Date(Math.min.apply(null,C.periods.map(function(p){return p.start;}))),
+    to:new Date(Math.max.apply(null,C.periods.map(function(p){return p.end;}))-1)
+  }:null;
+  C.omit=function(reason,it){
+    if(!C.omitted[reason]) C.omitted[reason]={};
+    C.omitted[reason][it.key]=1;
+  };
+  C.key=function(it, instant){
+    var ids=it.sprint_ids||[];
+    if(!ids.length){
+      C.omit(it.has_sprint?'unresolved Sprint identity':'without Sprint',it);
+      return null;
+    }
+    var value=instant===undefined?it.anchor_ts:instant;
+    var t=typeof value==='number'?value:Date.parse(value);
+    var dayOnly=typeof value==='string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(value);
+    var candidates=ids.map(function(id){return C.byId['jira:'+id];}).filter(function(p){
+      return p && t>=p.start &&
+        (dayOnly?t+86400000<=p.end:t<p.end);
+    });
+    if(candidates.length!==1){
+      C.omit(candidates.length>1?'ambiguous membership/anchor':'outside dated sprint intervals',it);
+      return null;
+    }
+    return candidates[0].id;
+  };
+  C.includes=function(it, instant){
+    var key=C.key(it,instant);
+    return !!(key&&C.selected[key]);
+  };
+  return C;
+}
+function rcPeriodKey(it, gran, C){
+  return C.real?C.key(it):rcBucketKey(new Date(it.dev_start),gran);
+}
+function rcPeriodEnd(key, gran, C){
+  return C.real?C.byId[key].end-1:rcBucketEnd(key,gran);
+}
+function rcPeriodSnapshot(it, key, gran, C){
+  return !C.real||C.key(it,rcPeriodEnd(key,gran,C))===key;
+}
+function rcSprintNote(C){
+  if(!C.real) return 'Sprint uses two-week calendar periods.';
+  var text='Real Jira sprints. Default: latest completed sprints with project activity; manual dates select whole sprint periods.';
+  if(!C.periods.length) text+=' N/A: no usable Jira sprint periods in this selection.';
+  if(Object.keys(C.partial).length) text+=' Unfinished sprints show partial data as of the Jira snapshot, excluded from comparative trends.';
+  var missing=(typeof RC_SPRINT_CATALOG==='undefined'?[]:RC_SPRINT_CATALOG)
+    .filter(function(s){ return !s.usable; }).length;
+  if(missing) text+=' '+missing+' sprint(s) have missing/conflicting dates and cannot be placed.';
+  Object.keys(C.omitted).forEach(function(reason){
+    text+=' Excluded '+Object.keys(C.omitted[reason]).length+' issue(s): '+reason+'.';
+  });
+  return text;
+}
 
 function rcPad2(v){ return String(v).padStart(2,'0'); }
 function rcDateStr(d){
@@ -199,6 +335,8 @@ function rcLastBucketKeys(lastD, n, gran){
 // periods inside the window stay on the axis (0 for count/flow/grouped/
 // snapshot metrics, a gap for averages and rates).
 function rcDefaultWindow(gran){
+  var sprint=rcSprintContext(gran,null,null,false);
+  if(sprint.real) return sprint.window;
   var last=rcProjectAnchor(gran);
   if(!last){
     rcActiveItems().forEach(function(it){
@@ -232,12 +370,20 @@ function rcDefaultWindow(gran){
 function rcSyncCalendar(){
   // [P1-I10] The flag is PER METRIC now; the global rcCalTouched stays as a
   // legacy fallback for callers that still read it.
-  if(rcCalTouchedMem[rcMetric] || rcCalTouched) return;
+  var remembered=rcCalendarRanges[rcCalendarKey()];
+  if(remembered){
+    document.getElementById('rcFrom').value=remembered.from;
+    document.getElementById('rcTo').value=remembered.to;
+    return;
+  }
   var gran=document.getElementById('rcPeriods').value || 'sprint';
   var w=rcDefaultWindow(gran);
   if(w){
     document.getElementById('rcFrom').value=rcDateStr(w.from);
     document.getElementById('rcTo').value=rcDateStr(w.to);
+  } else if(gran==='sprint'&&rcSprintSource(rcDraft||RC_SETTINGS)){
+    document.getElementById('rcFrom').value='';
+    document.getElementById('rcTo').value='';
   }
 }
 function rcPeriodsChanged(){

@@ -228,9 +228,28 @@ Incident Frequency, Time in QA, Defect Density, WIP, Flow Efficiency, Defect
 Escape Rate, Clarification/Review Cycle Count — with configurable periods
 (Daily…Annual), dimensions, Issue Type filters, two settings levels (Widget +
 Metric), and trend conclusions with Δ%. By default, all metrics use the same
-five-period window ending at the project's latest active two-week period.
-The current Sprint option always uses fixed two-week ISO buckets; it does not
-yet use actual Jira sprint boundaries, even when sprint fields are present.
+five-period window (or the metric's configured Default N).
+For Sprint, Widget settings → Sprint data availability controls the source:
+`auto` uses real Jira sprints when **more than 50% of all project issues**
+have a populated Sprint field, before dimension/type/date filters. Undated
+Sprint values count toward that threshold but cannot supply timeline periods.
+`available` forces real sprints; `none` forces two-week ISO calendar buckets.
+Auto below the threshold also uses those calendar buckets. Actual sprint
+IDs, names and irregular boundaries are preserved; closed sprints use their
+completion date, falling back to a valid planned end. Existing text caches
+are supported without a Jira re-sync.
+
+The real-sprint default is the latest N **completed** sprints with project
+activity. Manual dates select whole intersecting sprint periods, including
+unfinished ones; their partial data is excluded from comparative trends and
+snapshots never extend past the captured Jira data. Issues without Sprint,
+unusable sprint dates and ambiguous overlapping memberships are excluded
+from real-sprint calculations and explained in the existing tooltip.
+Unavailable real-sprint periods show N/A, not invented two-week sprints.
+Calendar granularities retain all eligible issues, including those without
+Sprint, and keep the latest active contiguous N-period window.
+Both widget and per-metric settings, units, anchors and issue-type filters
+remain effective. The separate Delivery CFD retains its calendar periods.
 Team filters resolve the configured field or labels for all metric records.
 The default production label `prod` matches production tokens such as `prod`,
 `production`, and `prod_bug`, but not `product` or `non-prod`; an explicit
@@ -303,6 +322,13 @@ node --test tests/test_trends_regressions.js
 
 The Node.js test loads the embedded JavaScript through `python3`. Set `PYTHON`
 to a Python executable if it is not available under that name.
+The suites cover Sprint parsing/coverage, all metric families, settings
+lifecycle, snapshot membership and chart/drilldown agreement. To also execute
+locally regenerated HTML, set `DEDAA_DASHBOARDS` to a JSON array of
+`{"path":"<local HTML path>","source":"jira"}` entries (`"calendar"` for a
+fallback project) before the Node command. Missing explicitly requested files
+fail the integration test; without this variable, only that optional
+private-data integration test is skipped. Do not commit the input dashboards.
 
 ---
 

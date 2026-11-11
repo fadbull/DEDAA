@@ -589,6 +589,8 @@ function rcVal(id){
 }
 function rcSettingsReset(){
   RC_SETTINGS=JSON.parse(JSON.stringify(RC_SETTINGS_DEFAULT));
+  rcSettingsClose();
+  rcWidgetSettingsClose();
   try{ window.localStorage.removeItem(RC_LS_KEY); }catch(e){}
   // [P1-I9]/[P1-I10] Reset restores the defaults: drop the session type
   // memory and the per-metric calendar-touched flags.
@@ -615,6 +617,8 @@ function rcSettingsImport(){
       try{
         var user=JSON.parse(rd.result);
         RC_SETTINGS=rcMergeSettings(RC_SETTINGS_DEFAULT, user);
+        rcSettingsClose();
+        rcWidgetSettingsClose();
         rcSettingsSave();
         rcRebuildData();
         rcSetMetric(rcMetric);

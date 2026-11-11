@@ -133,8 +133,16 @@ def _run_jira(api, args, db_path, collection, project_key):
     else:
         jql = args.jql or (f'project={project_key} AND updated >= -{days}d')
     print(f"[Jira] JQL: {jql}")
-    field_names = fetch_field_meta(api)
-    docs = sync_jira(api, project_key, jql, field_names, api.base, days)
+    fields = fetch_field_meta(api)
+    field_names = {field["id"]: field["name"] for field in fields}
+    sprint_fields = [
+        field["id"] for field in fields
+        if (field.get("schema") or {}).get("custom") == "com.pyxis.greenhopper.jira:gh-sprint"
+    ]
+    if not sprint_fields:
+        sprint_fields = [field["id"] for field in fields if field["name"].lower() == "sprint"]
+    docs = sync_jira(api, project_key, jql, field_names, api.base, days,
+                     sprint_fields=sprint_fields)
     ingest(docs, db_path, collection, args.batch_size, args.dry_run,
            update=args.update)
     # Also fetch and store the project's RELEASE / VERSION metadata.

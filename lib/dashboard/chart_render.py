@@ -21,12 +21,50 @@ RENDER_JS = """function rcApply(){
   // [P0-2] Effective metric settings: the gear-panel values (rcDraft or the
   // committed RC_SETTINGS) win over the static display config.
   var mEff=((rcDraft||RC_SETTINGS).metrics||{})[rcMetric]||{};
+  var periodContext=rcSprintContext(gran,from,to,rcCalTouchedCur());
+  Array.prototype.forEach.call(document.getElementById('rcPeriods').options||[],function(option){
+    if(option.value==='sprint') option.textContent=rcSprintSource(rcDraft||RC_SETTINGS)?'Sprint (Jira)':'Sprint (2 weeks)';
+  });
+  if(periodContext.real){
+    from=null; to=null;
+    if(!rcCalTouchedCur()){
+      var calendarWindow=periodContext.window;
+      document.getElementById('rcFrom').value=calendarWindow?rcDateStr(calendarWindow.from):'';
+      document.getElementById('rcTo').value=calendarWindow?rcDateStr(calendarWindow.to):'';
+    }
+  }
   var items=rcActiveItems();
   var isCoverage = cfg.aggregation==='coverage';
   var isWipSnap = cfg.aggregation==='wipSnapshot';   // [FIX-A4]
   var isAlloc = cfg.aggregation==='allocation';      // [FIX-A5] timespent share
   var isClarcycle = rcMetric==='clarcycle';           // [FIX-P0-1]
   var isReviewcycle = rcMetric==='reviewcycle';       // [FIX-P0-1]
+  function eventIncluded(it){
+    if(periodContext.real) return periodContext.includes(it);
+    var t=new Date(it.dev_start);
+    return !isNaN(t)&&(!from||t>=from)&&(!to||t<=to);
+  }
+  function readyFrom(it){
+    var rf=(it.readyFrom!==undefined&&it.readyFrom!==null)?it.readyFrom:Date.parse(it.dev_start);
+    if(it.readyFromUnverified){
+      if(periodContext.real) rf=Math.max(rf,periodContext.cutoff);
+      else if(from) rf=Math.max(rf,from.getTime());
+    }
+    return rf;
+  }
+  function snapshotIncluded(it,p){
+    if(!rcPeriodSnapshot(it,p,gran,periodContext)) return false;
+    var E=rcPeriodEnd(p,gran,periodContext);
+    if(isWipSnap) return it.enterDev!==null&&it.enterDev!==undefined&&
+      it.enterDev<=E&&(it.leaveDev===null||it.leaveDev===undefined||it.leaveDev>E);
+    return readyFrom(it)<=E&&(it.readyLeft===null||it.readyLeft===undefined||it.readyLeft>E);
+  }
+  function windowIncluded(it){
+    if(periodContext.real&&(isCoverage||isWipSnap)){
+      return periodContext.periods.some(function(p){ return snapshotIncluded(it,p.id); });
+    }
+    return eventIncluded(it);
+  }
   var agg={}, seriesAgg=null, groupAgg=null;
   var isFlow = cfg.aggregation==='flow';
   var isGrouped = cfg.aggregation==='grouped';
@@ -39,6 +77,7 @@ RENDER_JS = """function rcApply(){
   var filteredItems = items.filter(function(it){
     if(!rcDimMatch(it, dim, sel)) return false;
     if(typeSel && !typeSel[rcTypeLabel(it.type)]) return false;
+    if(periodContext.real) return windowIncluded(it);
     var t=new Date(it.dev_start);
     if(from && t<from) return false;
     if(to && t>to) return false;
@@ -81,6 +120,7 @@ RENDER_JS = """function rcApply(){
   items.forEach(function(it){
     if(!rcDimMatch(it, dim, sel)) return;
     if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
+    if(periodContext.real&&!windowIncluded(it)) return;
     // [P5-WIP] WIP snapshot: the item participates at every bucket end
     // inside [enterDev, leaveDev) — the same interval-overlap rule the
     // per-period aggregation below applies. The shared dev_start window
@@ -103,7 +143,7 @@ RENDER_JS = """function rcApply(){
     // window [from, to]: rf <= to && (rl === null || rl > from).
     // usedKeys is set only AFTER the overlap check.
     if(isCoverage){
-      var rf=(it.readyFrom!==undefined&&it.readyFrom!==null)?it.readyFrom:(new Date(it.dev_start)).getTime();
+      var rf=readyFrom(it);
       var rl=(it.readyLeft===null||it.readyLeft===undefined)?null:it.readyLeft;
       // [P1v3-1c] "Currently ready, no transition event": the readiness
       // start is NOT event-verified (derive fell back to the creation date).
@@ -116,14 +156,14 @@ RENDER_JS = """function rcApply(){
       if(to && rf>to.getTime()) return;
       if(from && rl!==null && rl<=from.getTime()) return;
       usedKeys[it.key]=1;
-      covReady.push({rf:rf, rl:rl, sp:(it.sp!==undefined&&it.sp!==null)?it.sp:0});
+      covReady.push({it:it, rf:rf, rl:rl, sp:(it.sp!==undefined&&it.sp!==null)?it.sp:0});
       return;
     }
     var t=new Date(it.dev_start);
     if(from&&t<from) return;
     if(to&&t>to) return;
     usedKeys[it.key]=1;
-    var key=rcBucketKey(t, gran);
+    var key=rcPeriodKey(it, gran, periodContext);
     if(isFlow){
       var s=it.series||'opened';
       if(!seriesAgg[s]) seriesAgg[s]={};
@@ -221,6 +261,7 @@ RENDER_JS = """function rcApply(){
     // window-scoped exactly like hasSPDen.
     var hasSPReady=covReady.some(function(iv){ return (iv.sp||0)>0; });
     var hasSPDen=(PM_DATA.velocity||[]).some(function(v){
+      if(!eventIncluded(v)) return false;
       var t=new Date(v.dev_start);
       if(isNaN(t)) return false;
       if(from&&t<from) return false;
@@ -233,16 +274,8 @@ RENDER_JS = """function rcApply(){
     // throughput) — cfg (RC_CFG) never carried this field, so the selector
     // had no effect before.
     var denEff=(mEff.denominator||'auto');
-    // [P3-2]/[P10-P0-2] The sprint gate follows the Widget settings
-    // (sprintData: auto-detect / available / none) with the SAME precedence
-    // rcSprintsAvail() applies — but read DIRECTLY: rcSprintsAvail()
-    // prefers the previous pass's snapshot, and using it here would make
-    // the auto decision depend on a stale snapshot (circular read).
-    var S2=rcDraft||RC_SETTINGS;
-    var sd2=(S2&&S2.sprintData)||'auto';
-    var sprGate = sd2==='available' ? true
-                : sd2==='none' ? false
-                : (typeof RC_HAS_SPRINTS_DATA==='undefined') ? true : !!RC_HAS_SPRINTS_DATA;
+    // Resolve from effective settings, never a previous window snapshot.
+    var sprGate=rcSprintSource(rcDraft||RC_SETTINGS);
     covUseSP = denEff==='velocity_sp' ? true
              : denEff==='throughput' ? false
              : (hasSPReady && hasSPDen && sprGate);
@@ -258,6 +291,7 @@ RENDER_JS = """function rcApply(){
     // still apply (they shape the window, not "what counts as work").
     var BH_DEN_TYPES={Story:1,Task:1,Defect:1};
     (PM_DATA.velocity||[]).forEach(function(v){
+      if(!eventIncluded(v)) return;
       var t=new Date(v.dev_start);
       if(isNaN(t)) return;
       if(from&&t<from) return;
@@ -267,7 +301,7 @@ RENDER_JS = """function rcApply(){
       // [P1v3-1d] The denominator items participate in the calculation —
       // they enter the issues table alongside the ready items.
       usedKeys[v.key]=1;
-      var k=rcBucketKey(t, gran);
+      var k=rcPeriodKey(v, gran, periodContext);
       if(!covDen[k]) covDen[k]={spSum:0,n:0};
       covDen[k].n++;
       covDen[k].spSum+=(v.sp||0);
@@ -290,6 +324,7 @@ RENDER_JS = """function rcApply(){
     // not flip the forced-SP N/A rule), so the global velocity pool with
     // the dim/type selection is the correct window-scoped source here.
     var hasSP=(PM_DATA.velocity||[]).some(function(v){
+      if(!eventIncluded(v)) return false;
       if((v.sp||0)<=0) return false;
       // [P22-T3] The snapshot must be window-scoped: SP outside the
       // from/to calendar range must not flip the forced-SP N/A rule.
@@ -306,6 +341,7 @@ RENDER_JS = """function rcApply(){
     // story points — the same 50% rule Defect Density uses).
     var velTot=0, velFilled=0;
     (PM_DATA.velocity||[]).forEach(function(v){
+      if(!eventIncluded(v)) return;
       var tv=new Date(v.dev_start);
       if(isNaN(tv)) return;
       if(from&&tv<from) return;
@@ -316,14 +352,14 @@ RENDER_JS = """function rcApply(){
     });
     var bfIts=filteredItems.filter(function(it){ return it.timeSpent!==undefined; });
     var w2=0; bfIts.forEach(function(it){ if((it.timeSpent||0)>0) w2++; });
-    var sd=(rcDraft||RC_SETTINGS||{}).sprintData||'auto';
     var vm2=(((rcDraft||RC_SETTINGS).metrics||{}).velocity||{}).velocityMode||'auto';
     return {
       ddMode: ddMode, ddFillRate: ddFillRate, ddFilled: ddFilled, ddTotal: ddTotal,
       hasSP: hasSP,
       velSpFill: velTot ? velFilled/velTot : 0,
-      sprintsAvail: (sd==='available') ? true : (sd==='none') ? false
-        : (typeof RC_HAS_SPRINTS_DATA==='undefined') ? true : !!RC_HAS_SPRINTS_DATA,
+      sprintsAvail: rcSprintSource(rcDraft||RC_SETTINGS),
+      periodSource: periodContext.real?'jira':'calendar',
+      periodIds: periodContext.real?periodContext.periods.map(function(p){return p.id;}):[],
       velocityMode: vm2,
       hasTimespent: bfIts.length ? (w2/Math.max(1,bfIts.length)>=0.2) : false,
       // [P10-P0-2] The Backlog Health decision, computed in the isCoverage
@@ -357,9 +393,12 @@ RENDER_JS = """function rcApply(){
   // shared default window) — never from the buckets that happen to carry
   // items, so empty periods stay visible and every metric shares the axis.
   var periods=[];
-  var granLabel = RC_GRAN_LABEL[gran] || 'Sprint (2 weeks)';
+  var granLabel = periodContext.real?'Jira Sprint':(RC_GRAN_LABEL[gran] || 'Sprint (2 weeks)');
   var rangeUsed = false;
-  if(hasCustom){
+  if(periodContext.real){
+    periods=periodContext.periods.map(function(p){return p.id;});
+    rangeUsed=rcCalTouchedCur();
+  } else if(hasCustom){
     // Calendar range applied: show a bar for EVERY bucket of the selected
     // granularity inside the range (X-axis = bucket timestamps).
     rangeUsed = true;
@@ -416,9 +455,10 @@ RENDER_JS = """function rcApply(){
   if(isCoverage){
     covVals = periods.map(function(p){
       // Period end timestamp for the snapshot.
-      var pe=rcBucketEnd(p, gran);
+      var pe=rcPeriodEnd(p, gran, periodContext);
       var ready=0, readySP=0;
       covReady.forEach(function(iv){
+        if(!rcPeriodSnapshot(iv.it,p,gran,periodContext)) return;
         if(iv.rf<=pe && (iv.rl===null||iv.rl===undefined||iv.rl>pe)){
           ready++; readySP+=(iv.sp||0);
         }
@@ -450,9 +490,10 @@ RENDER_JS = """function rcApply(){
                 ((rcDraft||RC_SETTINGS).metrics||{}).wip.wipMode || 'total';
     var wipPerDev=(wipMode==='per_developer');
     wipVals = periods.map(function(p){
-      var endP=rcBucketEnd(p, gran);
+      var endP=rcPeriodEnd(p, gran, periodContext);
       var cnt=0, devs={};
       wipItems.forEach(function(it){
+        if(!rcPeriodSnapshot(it,p,gran,periodContext)) return;
         var eD=it.enterDev;
         if(eD===null||eD===undefined||eD>endP) return;
         if(it.leaveDev!==null&&it.leaveDev!==undefined&&it.leaveDev<=endP) return;
@@ -621,7 +662,10 @@ RENDER_JS = """function rcApply(){
   // typeSel={} every item is skipped, the series is all-null and a flat
   // 0-trend would produce a false «Stable» verdict.
   var noTypesSelected = typeSel && Object.keys(typeSel).length===0;
-  var labels=periods;
+  var labels=periodContext.real?periods.map(function(p){return periodContext.byId[p].label;}):periods;
+  function completedValues(vals){
+    return vals.map(function(v,i){return periodContext.partial[periods[i]]?null:v;});
+  }
   var datasets=[], trend=null;
   var balTrend=null;   // [P0-3] single source of truth: flow trend = balance
   // [P1-I13] Issue Type dimension: one series per selected type. The
@@ -638,7 +682,7 @@ RENDER_JS = """function rcApply(){
     // the net balance (Resolved − Opened). The old ratio trend (opened ÷
     // resolved) could point the opposite way from the conclusion.
     var balance=openedVals.map(function(v,i){ return resolvedVals[i]-v; });
-    balTrend=rcLinearTrend(balance, true);
+    balTrend=rcLinearTrend(completedValues(balance), true);
     var balLabel=(rcMetric==='bugflow') ? 'Trend (Resolved − New)' : 'Trend (Resolved − Opened)';
     datasets=[
       {type:'bar', label:openLabel, data:openedVals,
@@ -660,7 +704,7 @@ RENDER_JS = """function rcApply(){
     });
     // Total per period for the conclusion/trend.
     var totals = periods.map(function(p){ var s=0; groups.forEach(function(g){ s+=(groupAgg[p]&&groupAgg[p][g])||0; }); return s; });
-    trend = rcLinearTrend(totals);
+    trend = rcLinearTrend(completedValues(totals));
     if(trend){ datasets.push({type:'line', label:'Trend', data:trend.line, borderColor:'#ef4444',
       borderDash:[6,4], fill:false, tension:0, pointRadius:0, borderWidth:2}); }
   } else if(isCoverage){
@@ -670,7 +714,7 @@ RENDER_JS = """function rcApply(){
     var tMin=(mS.targetMin!==undefined&&mS.targetMin!==null)?mS.targetMin:2;
     var tMax=(mS.targetMax!==undefined&&mS.targetMax!==null)?mS.targetMax:3;
     var bhVals=covVals.map(function(v){ return v===null?0:Math.round(v*100)/100; });
-    trend=rcLinearTrend(bhVals);
+    trend=rcLinearTrend(completedValues(bhVals));
     datasets=[
       {type:'bar', label:cfg.label, data:bhVals,
        backgroundColor:cfg.color+'99', borderColor:cfg.color, borderWidth:1},
@@ -687,7 +731,7 @@ RENDER_JS = """function rcApply(){
     var wipMode=((rcDraft||RC_SETTINGS).metrics||{}).wip &&
                 ((rcDraft||RC_SETTINGS).metrics||{}).wip.wipMode || 'total';
     var wipPerDev=(wipMode==='per_developer');
-    trend=rcLinearTrend(wipVals);
+    trend=rcLinearTrend(completedValues(wipVals));
     datasets=[
       {type:'bar', label:cfg.label, data:wipVals,
        backgroundColor:cfg.color+'99', borderColor:cfg.color, borderWidth:1}
@@ -731,7 +775,7 @@ RENDER_JS = """function rcApply(){
     var hasAnyValue=values.some(function(v){ return v!==null && v!==undefined; });
     trend = (emptyTypes || noTypesSelected || !hasAnyValue)
       ? null
-      : rcLinearTrend(values);
+      : rcLinearTrend(completedValues(values));
     datasets=[
       {type:'bar', label:(rcMetric==='velocity' ? rcMetricDisplayName('velocity') : cfg.label), data:values,
        backgroundColor:cfg.color+'99', borderColor:cfg.color, borderWidth:1}
@@ -771,6 +815,7 @@ RENDER_JS = """function rcApply(){
     return 'Δ '+s+(Math.abs(d)).toFixed(dec===undefined?1:dec)+'% last vs prev period';
   }
   function rcLastTwo(vals){
+    vals=completedValues(vals);
     if(!vals || vals.length<2) return null;
     return {last:vals[vals.length-1], prev:vals[vals.length-2]};
   }
@@ -807,8 +852,10 @@ RENDER_JS = """function rcApply(){
   } else if(isFlow){
     // [P24-E] rcFlowVerdict: the net level sets the colour, the balance
     // trend can only soften it to 🟡 (Recovering / Slowing).
-    var fv=rcFlowVerdict(openedVals, resolvedVals, stablePct);
-    var nP=openedVals.length;
+    var completeOpened=openedVals.filter(function(v,i){return !periodContext.partial[periods[i]];});
+    var completeResolved=resolvedVals.filter(function(v,i){return !periodContext.partial[periods[i]];});
+    var fv=rcFlowVerdict(completeOpened, completeResolved, stablePct);
+    var nP=completeOpened.length;
     if(!fv.ok && fv.reason==='empty'){
       conclEl.textContent='No activity in the window — no trend';
     } else if(!fv.ok){
@@ -837,12 +884,12 @@ RENDER_JS = """function rcApply(){
     // period the judgement refers to. No computable point → the standard
     // empty-state (no fabricated under-stocked verdict).
     var lastIdx=-1;
-    for(var ci=covComputable.length-1;ci>=0;ci--){ if(covComputable[ci]){ lastIdx=ci; break; } }
+    for(var ci=covComputable.length-1;ci>=0;ci--){ if(covComputable[ci]&&!periodContext.partial[periods[ci]]){ lastIdx=ci; break; } }
     if(lastIdx<0){
       conclEl.textContent='';
     } else {
       var lastV=covVals[lastIdx];
-      var lastP=periods[lastIdx];
+      var lastP=labels[lastIdx];
       // [P22-T5] Δ% must compare MEASUREMENTS, not placeholders: filter to
       // the computable control points before taking the last two.
       var covD=(function(){
@@ -868,7 +915,7 @@ RENDER_JS = """function rcApply(){
     if(isWipSnap){ serVals=wipVals; }
     else if(isGrouped){ serVals=totals; }
     else { serVals=values; }
-    var tv=rcTrendVerdict(serVals||[], dirUp?'up':'down', stablePct);
+    var tv=rcTrendVerdict(completedValues(serVals||[]), dirUp?'up':'down', stablePct);
     trendOk=!!tv.ok;
     var c=rcTrendText(tv, (serVals||[]).length);
     var dTxt=rcDeltaText(serVals||[], 1);
@@ -925,7 +972,7 @@ RENDER_JS = """function rcApply(){
     }
     note.textContent = baseNote + ' · X-axis: ' + granLabel + ' buckets' +
       ((rangeUsed && rcCalTouchedCur()) ? ' (calendar range applied)' :
-        ' · Default: last '+periods.length+' '+(gran==='sprint'?'sprints (2-week periods)':granLabel.toLowerCase()+' periods')
+        ' · Default: last '+periods.length+' '+(periodContext.real?'completed Jira sprints':gran==='sprint'?'sprints (2-week periods)':granLabel.toLowerCase()+' periods')
         +' up to the last active period of the project');
     if(rcMetric==='wip'){
       note.textContent += ' · Snapshot at the end of each period; for the customary daily WIP snapshot set Periods = Daily.';
@@ -960,56 +1007,53 @@ RENDER_JS = """function rcApply(){
   (function(){
     var periodSet={};
     periods.forEach(function(p){ periodSet[p]=1; });
-    var peAll=periods.map(function(p){ return rcBucketEnd(p, gran); });
     // [P24-T] The first aggregation pass may have added keys outside the
     // displayed buckets — the table is rebuilt from scratch here.
     usedKeys={};
     if(isWipSnap){
       wipItems.forEach(function(it){
-        var eD=it.enterDev;
-        if(eD===null||eD===undefined) return;
-        for(var pi=0;pi<peAll.length;pi++){
-          var E=peAll[pi];
-          if(eD<=E && (it.leaveDev===null||it.leaveDev===undefined||it.leaveDev>E)){ usedKeys[it.key]=1; tblPut(it,'wip'); return; }
+        if(periods.some(function(p){ return snapshotIncluded(it,p); })){
+          usedKeys[it.key]=1; tblPut(it,'wip');
         }
       });
     } else if(isCoverage){
       items.forEach(function(it){
         if(!rcDimMatch(it, dim, sel)) return;
         if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
-        var rf=(it.readyFrom!==undefined&&it.readyFrom!==null)?it.readyFrom:(new Date(it.dev_start)).getTime();
-        var rl=(it.readyLeft===null||it.readyLeft===undefined)?null:it.readyLeft;
-        if(it.readyFromUnverified && from && rf<from.getTime()) rf=from.getTime();
-        for(var pi=0;pi<peAll.length;pi++){
-          var E=peAll[pi];
-          if(rf<=E && (rl===null||rl>E)){ usedKeys[it.key]=1; tblPut(it,'ready'); return; }
+        if(periods.some(function(p){ return snapshotIncluded(it,p); })){
+          usedKeys[it.key]=1; tblPut(it,'ready');
         }
       });
-      var BH_DEN2={Story:1,Task:1,Defect:1};
       (PM_DATA.velocity||[]).forEach(function(v){
+        if(!eventIncluded(v)) return;
         var t=new Date(v.dev_start);
         if(isNaN(t)) return;
         if(from&&t<from) return;
         if(to&&t>to) return;
         if(!rcDimMatch(v, dim, sel)) return;
         if(!BH_DEN_TYPES[rcTypeLabel(v.type)]) return;
-        if(periodSet[rcBucketKey(t, gran)]){ usedKeys[v.key]=1; tblPut(v,'speed'); }
+        if(periodSet[rcPeriodKey(v, gran, periodContext)]){ usedKeys[v.key]=1; tblPut(v,'speed'); }
       });
     } else {
       items.forEach(function(it){
+        if(!eventIncluded(it)) return;
         if(!rcDimMatch(it, dim, sel)) return;
         if(typeSel && !typeSel[rcTypeLabel(it.type)]) return;
         var t=new Date(it.dev_start);
         if(isNaN(t)) return;
         if(from&&t<from) return;
         if(to&&t>to) return;
-        if(periodSet[rcBucketKey(t, gran)]){ usedKeys[it.key]=1; tblPut(it); }
+        if(periodSet[rcPeriodKey(it, gran, periodContext)]){ usedKeys[it.key]=1; tblPut(it); }
       });
     }
   })();
   // Issues table: unique issues that participated in this calculation.
   RC_TABLE.rows=Object.keys(usedKeys);
   RC_TABLE.vals=tblVals;
+  RC_WIN_STATE.periodNote=gran==='sprint'?rcSprintNote(periodContext):'';
+  if(periodContext.real&&!periods.length){
+    document.getElementById('rcConclusion').textContent='ⓘ N/A — no usable Jira sprint periods in this selection.';
+  }
   var vHdr=document.getElementById('rcTableValHdr');
   if(vHdr){ vHdr.textContent=rcTableValueHeader(rcMetric, velSpMode); }
   RC_TABLE.page=0;

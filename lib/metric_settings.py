@@ -105,9 +105,9 @@ DEFAULT_SETTINGS = {
     # an explicit non-default value overrides the widget-level default.
     "prodLabel": "prod",
     # [P3-2] Sprint data availability (widget-level): auto | available | none.
-    # auto: detect from the project data (any item carrying a sprint field);
-    # available/none: the user's explicit statement. Feeds the Backlog
-    # Health auto state only — the state formulas themselves are unchanged.
+    # auto: actual Sprint periods when >50% of all project issues have Sprint;
+    # available forces real sprints; none forces two-week calendar periods.
+    # Also controls sprint availability for the Backlog Health auto state.
     "sprintData": "auto",
     # priority (lowercase) -> severity group for Incident Frequency.
     # Minor is explicit (Normal/Trivial); anything not listed anywhere still
@@ -395,6 +395,8 @@ def merge_settings(user):
     is never mutated."""
     if not user:
         return copy.deepcopy(DEFAULT_SETTINGS)
+    if "sprintData" in user and user["sprintData"] not in ("auto", "available", "none"):
+        raise ValueError("sprintData must be auto, available or none")
 
     def _merge(base, over):
         out = dict(base)
@@ -420,13 +422,18 @@ def load_settings(path):
         raise SystemExit(f"Metric settings file {path} is not valid JSON: {e}")
     if not isinstance(user, dict):
         raise SystemExit(f"Metric settings file {path} must contain a JSON object")
-    return merge_settings(user)
+    try:
+        return merge_settings(user)
+    except ValueError as e:
+        raise SystemExit(f"Invalid metric settings in {path}: {e}") from e
 
 
 def validate_settings(s):
     """Light structural validation; returns a list of human-readable
     problems (empty list = OK)."""
     problems = []
+    if s.get("sprintData", "auto") not in ("auto", "available", "none"):
+        problems.append("sprintData must be auto, available or none")
     if not isinstance(s.get("statusSets"), dict) or not s["statusSets"]:
         problems.append("statusSets must be a non-empty object")
     for name, vals in (s.get("statusSets") or {}).items():

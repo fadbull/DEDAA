@@ -604,15 +604,9 @@ function rcWindowHasSP(){
 }
 // [P3-2] Effective sprint availability: the Widget settings statement
 // (sprintData: auto | available | none); auto resolves from the project
-// data flag (RC_HAS_SPRINTS_DATA, computed by the Python derivation).
-// [P1-B6] The snapshot's value wins — it is the one the chart used.
+// project-wide field coverage, independently of the previous chart snapshot.
 function rcSprintsAvail(){
-  if(RC_WIN_STATE && RC_WIN_STATE.sprintsAvail!==undefined) return !!RC_WIN_STATE.sprintsAvail;
-  var S=rcDraft||RC_SETTINGS;
-  var sd=(S&&S.sprintData)||'auto';
-  if(sd==='available') return true;
-  if(sd==='none') return false;
-  return (typeof RC_HAS_SPRINTS_DATA==='undefined') ? true : !!RC_HAS_SPRINTS_DATA;
+  return rcSprintSource(rcDraft||RC_SETTINGS);
 }
 function rcDensityMode(){
   // [P1-B6] The snapshot's effective mode (computed on the WINDOW items)
@@ -798,6 +792,7 @@ function rcTipFor(mk){
   if(document.getElementById('rcDim') && document.getElementById('rcDim').value==='person'){
     tip += ' Person view is for coaching only — never for performance evaluation.';
   }
+  if(RC_WIN_STATE && RC_WIN_STATE.periodNote) tip+=' '+RC_WIN_STATE.periodNote;
   return tip;
 }
 function rcSetTip(){

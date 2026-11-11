@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from .date_utils import _dt, _dt_full, _biweek, status_group, _status_events_from_text
 from .metric_settings import DEFAULT_SETTINGS, merge_settings
+from .jira_sprints import issue_sprints, sprint_catalog
 
 
 import copy
@@ -281,6 +282,7 @@ def compute_jira(meta, docs, settings=None):
     # Raw per-issue records (events/labels/priority/created/...) for the
     # dashboard's settings-driven metric derivation (RC_RAW).
     pm_raw_items = []
+    pm_sprint_records = []
 
     # ---- Team-source discovery (before the main loop) ----------------------
     # Scan the issue documents for fields rendered as "Team: value" /
@@ -506,6 +508,8 @@ def compute_jira(meta, docs, settings=None):
         # (RC_RAW): everything the JS needs to re-derive every metric from
         # configurable status sets / anchors (see lib/metric_settings.py).
         if _ikey:
+            sprint_present, sprints = issue_sprints(m, d)
+            pm_sprint_records.extend(sprints)
             pm_raw_items.append({
                 "key": _ikey,
                 "type": typ,
@@ -521,6 +525,11 @@ def compute_jira(meta, docs, settings=None):
                 "status": status,
                 "created": (created or "")[:19],
                 "resolutiondate": (resolution_date or "")[:10],
+                "created_ts": created or "",
+                "resolved_ts": resolution_date or "",
+                "updated_ts": updated or "",
+                "has_sprint": sprint_present,
+                "sprint_ids": list(dict.fromkeys(s["id"] for s in sprints)),
                 "labels": labels or "",
                 "priority": prio,
                 "sp": _sp,
@@ -1167,6 +1176,11 @@ def compute_jira(meta, docs, settings=None):
         "pm_floweff_items": pm_floweff_items,
         "pm_issue_dir": pm_issue_dir,
         "pm_raw_items": pm_raw_items,
+        "pm_sprint_catalog": sprint_catalog(pm_sprint_records),
+        "pm_sprint_coverage": {
+            "total": len(pm_raw_items),
+            "populated": sum(bool(r["has_sprint"]) for r in pm_raw_items),
+        },
         "pm_settings": _auto_seed_settings(S, pm_raw_items),
         # [P2v3-1/2] New metrics: Python ground truth for the parity harness.
         "pm_clarcycle_items": pm_clarcycle_items,

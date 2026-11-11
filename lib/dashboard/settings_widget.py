@@ -46,7 +46,7 @@ function rcSettingsLoad(){
     user._schema = 2;
     RC_SETTINGS=rcMergeSettings(RC_SETTINGS_DEFAULT, user);
     rcSettingsSave();
-  }catch(e){ /* corrupted storage -> keep defaults */ }
+  }catch(e){ console.warn('Could not load stored metric settings; using defaults: '+e.message); }
 }
 function rcSettingsSave(){
   try{ window.localStorage.setItem(RC_LS_KEY, JSON.stringify(RC_SETTINGS)); }
@@ -54,6 +54,10 @@ function rcSettingsSave(){
 }
 // Deep-merge a user patch over base (lists replace, objects merge).
 function rcMergeSettings(base, user){
+  if(user&&Object.prototype.hasOwnProperty.call(user,'sprintData')&&
+     ['auto','available','none'].indexOf(user.sprintData)<0){
+    throw new Error('sprintData must be auto, available or none');
+  }
   var out=JSON.parse(JSON.stringify(base));
   (function deep(b,o){
     Object.keys(o||{}).forEach(function(k){
@@ -71,6 +75,7 @@ function rcRebuildData(){
   // [P24-A] The project activity anchor depends on the raw data and the
   // settings (team source, person threshold) — recompute it on rebuild.
   if(typeof rcAnchorCache!=='undefined'){ rcAnchorCache={}; }
+  if(typeof RC_WIN_STATE!=='undefined'){ RC_WIN_STATE=null; }
   var derived=rcDeriveAll();
   Object.keys(derived).forEach(function(mk){ PM_DATA[mk]=derived[mk]; });
 }
@@ -167,14 +172,13 @@ function rcWidgetSettingsRender(){
   // [P3-2] Sprint data availability: auto-detect by data, or an explicit
   // user statement. Feeds the Backlog Health auto state (see rcSprintsAvail).
   var sd=((rcDraft||RC_SETTINGS)||{}).sprintData||'auto';
-  var effSprints=rcSprintsAvail();
   h+='<div class="mb-2"><div class="text-xs text-gray-500 mb-1">Sprint data availability</div>'
-    +'<select id="rcSet_sprintData" class="border rounded px-1 py-0.5 text-xs" onchange="rcPanelChanged()">'
-    +'<option value="auto"'+(sd==='auto'?' selected':'')+'>Auto-detect (currently '+(RC_HAS_SPRINTS_DATA?'Sprints available':'No sprints')+')</option>'
-    +'<option value="available"'+(sd==='available'?' selected':'')+'>Sprints available</option>'
-    +'<option value="none"'+(sd==='none'?' selected':'')+'>No sprints</option>'
+    +'<select id="rcSet_sprintData" class="border rounded px-1 py-0.5 text-xs" onchange="rcWidgetPanelChanged()">'
+    +'<option value="auto"'+(sd==='auto'?' selected':'')+'>Auto (&gt;50% coverage; currently '+(RC_HAS_SPRINTS_DATA?'Jira sprints':'two-week calendar periods')+')</option>'
+    +'<option value="available"'+(sd==='available'?' selected':'')+'>Real Jira sprints (force)</option>'
+    +'<option value="none"'+(sd==='none'?' selected':'')+'>Two-week calendar periods (ignore sprints)</option>'
     +'</select>'
-    +'<div class="text-xs text-gray-400 mt-1">Controls which Backlog Health state the Auto rule picks. auto: detect from the project data (any item carrying a sprint field); available/none: your explicit statement.</div></div>';
+    +'<div class="text-xs text-gray-400 mt-1">Controls Sprint periods for all metrics and Backlog Health Auto. Auto: real Jira sprints when Sprint is populated on more than 50% of all project issues; otherwise two-week calendar periods. Available forces real sprints; none forces calendar periods. Missing dates are not invented. Default: latest completed sprints; unfinished sprints are available through a manual date range.</div></div>';
   // ---- [P1-1] Person min cohort -------------------------------------------
   var pmc=(S.personMinCohort!==undefined&&S.personMinCohort!==null)?S.personMinCohort:5;
   h+='<div class="mb-2"><div class="text-xs text-gray-500 mb-1">Person min cohort (Dimension: Person)</div>'

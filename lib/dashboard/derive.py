@@ -86,7 +86,11 @@ function rcDeriveAll(){
   var SETMAP={devStart:DEV, done:DONE, qaEntry:QA, qaSet:QASET, qaExit:QAEXIT,
               backlog:BACKLOG, refinement:REFIN, ready:READY,
               review:REVIEW};   // [FIX-A0] · [P2v3-2] review added
-  function midn(d){ return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); }
+  function midn(d){
+    var result=new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    result.jiraTimestamp=d.jiraTimestamp;
+    return result;
+  }
   function anc(ev, cd, rd, spec){
     if(!spec) return null;
     if(spec.kind==='field'){
@@ -113,6 +117,8 @@ function rcDeriveAll(){
     var lbl=normType(r.type);
     var cd=r.created?new Date(r.created):null;
     var rd=r.resolutiondate?new Date(r.resolutiondate+'T00:00:00'):null;
+    if(cd) cd.jiraTimestamp=r.created_ts||r.created;
+    if(rd) rd.jiraTimestamp=r.resolved_ts||r.resolutiondate;
     var ev=(r.events||[]).map(function(e){ return [new Date(e[0]), e[1]]; });
     var isBug=!!mtypes('bugflow')[lbl],
         isVel=!!mtypes('velocity')[lbl];   // [P0-TYPES] isReq removed — every time-based metric gates on its own types now
@@ -120,7 +126,9 @@ function rcDeriveAll(){
     function item(devDate, extra){
       var it={key:r.key, project:r.project, team:r.team, epic:r.epic,
               person:r.person, type:r.type, labels:r.labels,
-              fieldvals:r.fieldvals, dev_start:iso(devDate)};
+              fieldvals:r.fieldvals, has_sprint:r.has_sprint, sprint_ids:r.sprint_ids||[],
+              anchor_ts:devDate.jiraTimestamp||devDate.toISOString(),
+              dev_start:iso(devDate)};
       if(extra) Object.keys(extra).forEach(function(k){ it[k]=extra[k]; });
       return it;
     }
